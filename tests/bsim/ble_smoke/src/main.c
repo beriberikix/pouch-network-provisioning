@@ -68,10 +68,8 @@ static K_SEM_DEFINE(sem_connected, 0, 1);
 static K_SEM_DEFINE(sem_secured, 0, 1);
 static K_SEM_DEFINE(sem_discovered, 0, 1);
 static K_SEM_DEFINE(sem_subscribed, 0, 1);
-static K_SEM_DEFINE(sem_written, 0, 1);
 
 static struct bt_conn *default_conn;
-static uint8_t last_write_err;
 
 /* Incoming downlink notifications (SAR ACKs from the device's receiver). */
 K_MSGQ_DEFINE(dl_ack_q, SAR_ACK_LEN, 4, 1);
@@ -321,32 +319,14 @@ static int subscribe(struct bt_gatt_subscribe_params *params,
 	return wait_stage(&sem_subscribed, stage);
 }
 
-static void write_cb(struct bt_conn *conn, uint8_t err, struct bt_gatt_write_params *params)
-{
-	last_write_err = err;
-	k_sem_give(&sem_written);
-}
-
+/* The pouch GATT transport is designed for ATT Write Commands: its write
+ * handler consumes the data but returns 0, which the ATT server rejects
+ * for Write Requests after the data was already accepted (flow control
+ * lives in the SAR ACKs instead).
+ */
 static int gatt_write_sync(uint16_t handle, const void *data, uint16_t len)
 {
-	static struct bt_gatt_write_params wp;
-
-	wp.func = write_cb;
-	wp.handle = handle;
-	wp.offset = 0;
-	wp.data = data;
-	wp.length = len;
-
-	int err = bt_gatt_write(default_conn, &wp);
-
-	if (err != 0) {
-		return err;
-	}
-	if (wait_stage(&sem_written, "write") != 0) {
-		return -ETIMEDOUT;
-	}
-
-	return last_write_err == 0 ? 0 : -EIO;
+	return bt_gatt_write_without_response(default_conn, handle, data, len, false);
 }
 
 /* Send the request pouch as one SAR transaction on the downlink
