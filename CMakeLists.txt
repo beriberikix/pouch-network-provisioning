@@ -18,7 +18,9 @@ zephyr_library_sources(
 )
 zephyr_library_include_directories(src src/codec/include)
 
-# M3+: src/identity.c src/handlers/auth.c
+zephyr_library_sources_ifdef(CONFIG_POUCH_PROV_IDENTITY src/identity.c)
+zephyr_library_sources_ifdef(CONFIG_POUCH_PROV_AUTH src/handlers/auth.c)
+
 # M4:  src/handlers/wifi_config.c src/handlers/wifi_scan.c src/handlers/ctrl.c
 # M5:  src/cred_store.c src/handlers/cred.c
 

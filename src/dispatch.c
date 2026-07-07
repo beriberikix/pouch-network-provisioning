@@ -28,8 +28,10 @@ LOG_MODULE_REGISTER(pouch_prov_dispatch, CONFIG_POUCH_PROV_LOG_LEVEL);
 
 static const struct pouch_prov_endpoint endpoints[] = {
 	{ .path = POUCH_PROV_PATH_VER, .handler = pouch_prov_handle_ver, .require_auth = false },
-	/* .prov/auth (M3), .prov/config, .prov/scan (M4), .prov/cred (M5),
-	 * .prov/ctrl are appended as their handlers land. */
+#if defined(CONFIG_POUCH_PROV_AUTH)
+	{ .path = POUCH_PROV_PATH_AUTH, .handler = pouch_prov_handle_auth, .require_auth = false },
+#endif
+	/* .prov/config, .prov/scan (M4), .prov/cred (M5), .prov/ctrl land next. */
 };
 
 static struct {
@@ -55,6 +57,9 @@ void pouch_prov_dispatch_reset(void)
 {
 	active.endpoint = NULL;
 	authorized = false;
+#if defined(CONFIG_POUCH_PROV_AUTH)
+	pouch_prov_auth_reset();
+#endif
 }
 
 /**

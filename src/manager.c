@@ -77,14 +77,25 @@ int pouch_prov_mgr_init(const struct pouch_prov_config *cfg)
 
 	config = *cfg;
 
+	struct pouch_config pouch_cfg;
+
 #if defined(CONFIG_POUCH_ENCRYPTION_NONE)
-	struct pouch_config pouch_cfg = {
-		.device_id = config.device_id,
-	};
+	pouch_cfg.device_id = config.device_id;
+#elif defined(CONFIG_POUCH_PROV_IDENTITY)
+	/* Generate/restore the device's pouch identity (persistent key + cert)
+	 * and hand it to pouch. The settings backend must be loaded first so a
+	 * previously generated certificate is restored. */
+	if (IS_ENABLED(CONFIG_SETTINGS)) {
+		(void)settings_subsys_init();
+		(void)settings_load_subtree("pnp/id");
+	}
+	err = pouch_prov_identity_ensure(&pouch_cfg.certificate, &pouch_cfg.private_key);
+	if (err != 0) {
+		LOG_ERR("identity setup failed (%d)", err);
+		return err;
+	}
 #else
-	/* SAEAD identity (ephemeral self-signed cert) lands in M3. */
-	struct pouch_config pouch_cfg = { 0 };
-#error "POUCH_PROV currently requires CONFIG_POUCH_ENCRYPTION_NONE (saead lands in M3)"
+#error "POUCH_PROV needs CONFIG_POUCH_ENCRYPTION_NONE or CONFIG_POUCH_PROV_IDENTITY"
 #endif
 
 	err = pouch_init(&pouch_cfg);

@@ -44,8 +44,17 @@ config POUCH_PROV_CRED
 
 config POUCH_PROV_IDENTITY
 	bool "Generate ephemeral device identity on first boot"
-	default y
+	default y if POUCH_ENCRYPTION_SAEAD
 	depends on SETTINGS
+	select MBEDTLS
+	select MBEDTLS_X509_CRT_WRITE_C
+	select MBEDTLS_PK_WRITE_C
+	select PSA_WANT_KEY_TYPE_ECC_KEY_PAIR_GENERATE
+	select PSA_WANT_KEY_TYPE_ECC_KEY_PAIR_DERIVE
+	select PSA_WANT_ALG_ECDH
+	select PSA_WANT_ALG_ECDSA
+	select PSA_WANT_ECC_SECP_R1_256
+	select PSA_WANT_ALG_SHA_256
 	help
 	  On first boot, generate a P-256 key pair and a self-signed X.509
 	  certificate to serve as the device's pouch identity, and persist
@@ -55,6 +64,9 @@ config POUCH_PROV_IDENTITY
 config POUCH_PROV_AUTH
 	bool "Proof-of-possession session authorization (.prov/auth)"
 	default y
+	select PSA_WANT_ALG_HMAC
+	select PSA_WANT_KEY_TYPE_HMAC
+	select PSA_WANT_ALG_SHA_256
 	help
 	  Require a mutual HMAC-SHA256 proof-of-possession challenge-response
 	  inside the encrypted pouch session before accepting provisioning

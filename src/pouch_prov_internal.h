@@ -60,6 +60,17 @@ void pouch_prov_mgr_session_ended(void);
 int pouch_prov_adv_start(void);
 int pouch_prov_adv_stop(void);
 
+/* identity.c */
+#if defined(CONFIG_POUCH_PROV_IDENTITY)
+#include <pouch/types.h>
+#include <psa/crypto.h>
+int pouch_prov_identity_ensure(struct pouch_cert *cert_out, psa_key_id_t *key_out);
+#endif
+
 /* handlers */
 int pouch_prov_handle_ver(const uint8_t *req, size_t req_len, uint8_t *rsp, size_t rsp_size,
 			  size_t *rsp_len);
+int pouch_prov_handle_auth(const uint8_t *req, size_t req_len, uint8_t *rsp, size_t rsp_size,
+			   size_t *rsp_len);
+/* Reset per-connection auth state (called on disconnect). */
+void pouch_prov_auth_reset(void);
