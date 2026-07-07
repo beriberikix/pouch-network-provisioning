@@ -46,6 +46,59 @@ jobs:
           path: twister-ztest/twister.xml
           if-no-files-found: ignore
 
+  bsim:
+    name: BLE transport test (BabbleSim)
+    runs-on: ubuntu-latest
+    container: ghcr.io/zephyrproject-rtos/ci:v0.28.4
+    env:
+      ZEPHYR_TOOLCHAIN_VARIANT: zephyr
+      ZEPHYR_SDK_INSTALL_DIR: /opt/toolchains
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          path: pouch-network-provisioning
+
+      - name: West init + update (skip sample-only deps)
+        run: |
+          west init -l pouch-network-provisioning
+          west config manifest.group-filter -- -samples
+          west update --narrow -o=--depth=1
+          west zephyr-export
+
+      - name: Build BabbleSim
+        run: |
+          make -C tools/bsim everything -j $(nproc)
+          echo "BSIM_OUT_PATH=$(west topdir)/tools/bsim/" >> $GITHUB_ENV
+          echo "BSIM_COMPONENTS_PATH=$(west topdir)/tools/bsim/components/" >> $GITHUB_ENV
+
+      - name: Install twister + pouch Python deps
+        run: |
+          pip3 install -r zephyr/scripts/requirements.txt
+          pip3 install -r modules/lib/pouch/requirements.txt  # zcbor (pouch build)
+
+      - name: Twister — bsim BLE smoke test
+        run: |
+          west twister -T pouch-network-provisioning/tests/bsim \
+            -p nrf52_bsim/native -v --inline-logs --outdir twister-bsim
+
+      - name: Check the bsim suite actually ran
+        # Guard against a silent platform skip: twister filters nrf52_bsim
+        # out entirely (and exits 0) if BSIM_OUT_PATH isn't set.
+        run: grep -q "pouch_prov.bsim.ble_smoke" twister-bsim/twister.xml
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: twister-bsim
+          path: |
+            twister-bsim/twister.xml
+            twister-bsim/**/handler.log
+            twister-bsim/**/twister_harness.log
+            twister-bsim/**/build.log
+          if-no-files-found: ignore
+
   build:
     name: Sample builds
     runs-on: ubuntu-latest
