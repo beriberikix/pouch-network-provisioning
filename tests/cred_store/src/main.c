@@ -9,6 +9,7 @@
 
 #include <zephyr/ztest.h>
 #include <zephyr/settings/settings.h>
+#include <zephyr/kernel.h>
 
 #include <pouch_prov/credentials.h>
 
@@ -27,6 +28,12 @@ void pouch_prov_emit(enum pouch_prov_event event, const void *data)
 
 static const uint8_t fake_key[120] = {1, 2, 3, 4, 5};
 
+static void *suite_setup(void)
+{
+	(void)settings_subsys_init(); /* required before settings_save_one/load */
+	return NULL;
+}
+
 static void before(void *unused)
 {
 	ARG_UNUSED(unused);
@@ -34,7 +41,7 @@ static void before(void *unused)
 	(void)pouch_prov_cred_delete_all();
 }
 
-ZTEST_SUITE(cred_store, NULL, NULL, before, NULL, NULL);
+ZTEST_SUITE(cred_store, NULL, suite_setup, before, NULL, NULL);
 
 /* Stage a blob in chunks of `chunk` bytes. */
 static void stage_chunked(int kind, const uint8_t *der, size_t len, size_t chunk)

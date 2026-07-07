@@ -39,6 +39,14 @@ static const struct fake_wifi_ap AP = {
 	.channel = 6, .rssi = -50, .security = WIFI_SECURITY_TYPE_PSK,
 };
 
+static void *suite_setup(void)
+{
+	/* Register the handlers' net_mgmt event callbacks (idempotent). */
+	pouch_prov_wifi_config_init(1);
+	pouch_prov_wifi_scan_init();
+	return NULL;
+}
+
 static void reset_all(void *unused)
 {
 	ARG_UNUSED(unused);
@@ -47,7 +55,7 @@ static void reset_all(void *unused)
 	pouch_prov_wifi_config_reset();
 }
 
-ZTEST_SUITE(wifi_handlers, NULL, NULL, reset_all, NULL, NULL);
+ZTEST_SUITE(wifi_handlers, NULL, suite_setup, reset_all, NULL, NULL);
 
 /* Encode a config set + apply, run them, and pump the connect work. */
 static uint32_t apply_creds(const char *ssid, const char *pass)
