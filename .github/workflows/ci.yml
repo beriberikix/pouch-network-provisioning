@@ -73,12 +73,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - name: Install
-        run: uv pip install --system -e "cli[dev]"
-      - name: Ruff
-        run: ruff check cli/src cli/tests
-      - name: Pytest
-        run: pytest cli
+      - name: Install + check
+        run: |
+          uv venv
+          uv pip install -e "cli[dev]"
+          .venv/bin/ruff check cli/src cli/tests
+          .venv/bin/pytest cli
 
   codegen:
     name: Generated code in sync
@@ -88,13 +88,14 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - name: Regenerate zcbor codec + vectors and diff
         run: |
-          uv pip install --system "zcbor==0.9.1" "cbor2>=5.6,<5.7" cryptography click
+          uv venv
+          uv pip install "zcbor==0.9.1" "cbor2>=5.6,<5.7" cryptography click
           rm -rf src/codec
-          zcbor code -c cddl/prov.cddl -d -e --default-max-qty 8 \
+          .venv/bin/zcbor code -c cddl/prov.cddl -d -e --default-max-qty 8 \
             -t ver-req ver-rsp auth-req auth-rsp config-req config-rsp \
                scan-req scan-rsp cred-req cred-rsp ctrl-req ctrl-rsp \
             --output-c src/codec/prov.c --output-h src/codec/include/prov.h
-          python scripts/gen_vectors.py
-          python scripts/vectors_to_c.py
+          .venv/bin/python scripts/gen_vectors.py
+          .venv/bin/python scripts/vectors_to_c.py
           git diff --exit-code -- src/codec tests/vectors tests/codec/src/vectors.inc \
             || (echo "::error::Generated code is out of date; run zcbor + scripts/gen_vectors.py + scripts/vectors_to_c.py" && exit 1)
