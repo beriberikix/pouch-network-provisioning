@@ -4,6 +4,10 @@
 # West manifest for developing pouch-network-provisioning standalone.
 # Downstream users add this repo as a project in their own manifest instead.
 manifest:
+  # Zephyr's manifest disables the babblesim group by default; enable it so
+  # the bsim BLE tests (tests/bsim) can build the simulator from tools/bsim.
+  group-filter: [+babblesim]
+
   self:
     path: pouch-network-provisioning
 
@@ -28,9 +32,15 @@ manifest:
           - mbedtls
           - mcuboot
           - net-tools
+          - nrf_hw_models # nRF radio HW models for the nrf52_bsim board
           - segger
           - tinycrypt
           - zcbor
+        # BabbleSim simulator + components (babblesim group), for tests/bsim.
+        path-allowlist:
+          - tools/bsim
+          - tools/bsim/*
+          - tools/bsim/*/*
     - name: pouch
       remote: golioth
       revision: 18ae45883ce23eb1e0de0dc87ee81dbb9c983043
