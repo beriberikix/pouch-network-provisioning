@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.venv/
+build*/
+twister-out*/
+.DS_Store
+*.egg-info/

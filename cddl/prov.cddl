@@ -1,0 +1,159 @@
+; Copyright (c) 2026 Jonathan Beri
+; SPDX-License-Identifier: Apache-2.0
+;
+; pouch-network-provisioning wire protocol, version 1.
+;
+; Every message is a CBOR array whose first element is an operation code.
+; Requests travel as pouch downlink entries, responses as pouch uplink
+; entries on the same ".prov/*" path, content type 60 (CBOR).
+; Maps are extensible: decoders MUST ignore unknown keys.
+
+; ---- Common ------------------------------------------------------------
+
+prov-status = status-ok / status-invalid-proto / status-invalid-argument
+            / status-internal-error / status-unauthorized
+            / status-invalid-state / status-busy
+status-ok = 0
+status-invalid-proto = 1
+status-invalid-argument = 2
+status-internal-error = 3
+status-unauthorized = 4
+status-invalid-state = 5
+status-busy = 6
+
+; ---- .prov/ver (always available, never gated by auth) ------------------
+
+ver-req = [op-ver-get]
+op-ver-get = 0
+
+ver-rsp = [op-ver-get, prov-status, ver-info]
+ver-info = {
+    "proto" => uint,          ; protocol version, 1
+    "caps" => [* tstr],       ; e.g. "wifi", "scan", "cred", "auth"
+    "blk" => uint,            ; device pouch block size (payload sizing hint)
+    "lib" => tstr,            ; library version string
+    ? "pop" => bool,          ; true when PoP authorization is required
+}
+
+; ---- .prov/auth — mutual PoP challenge-response --------------------------
+; proofs: HMAC-SHA256(PoP, "dev" / "cli" || peer-nonce || own-nonce)
+
+auth-req = auth-challenge / auth-proof
+auth-challenge = [op-auth-challenge, cli-nonce: bstr .size 16]
+auth-proof = [op-auth-proof, cli-proof: bstr .size 32]
+op-auth-challenge = 0
+op-auth-proof = 1
+
+auth-rsp = auth-challenge-rsp / auth-proof-rsp
+auth-challenge-rsp = [op-auth-challenge, prov-status,
+                      dev-nonce: bstr .size 16, dev-proof: bstr .size 32]
+auth-proof-rsp = [op-auth-proof, prov-status]
+
+; ---- .prov/config — Wi-Fi station configuration --------------------------
+
+config-req = config-get-status / config-set / config-apply
+config-get-status = [op-config-status]
+config-set = [op-config-set, wifi-config]
+config-apply = [op-config-apply]
+op-config-status = 0
+op-config-set = 1
+op-config-apply = 2
+
+wifi-config = {
+    "ssid" => bstr .size (1..32),
+    ? "pass" => bstr .size (0..64),
+    ? "bssid" => bstr .size 6,
+    ? "ch" => uint,
+}
+
+config-rsp = config-status-rsp / config-set-rsp / config-apply-rsp
+config-status-rsp = [op-config-status, prov-status, sta-state, ? config-detail]
+config-set-rsp = [op-config-set, prov-status]
+config-apply-rsp = [op-config-apply, prov-status]
+
+sta-state = sta-connected / sta-connecting / sta-disconnected / sta-failed
+sta-connected = 0
+sta-connecting = 1
+sta-disconnected = 2
+sta-failed = 3
+
+config-detail = fail-reason / connected-info
+fail-reason = fail-auth-error / fail-network-not-found
+fail-auth-error = 0
+fail-network-not-found = 1
+
+connected-info = {
+    "ip4" => bstr .size 4,
+    "ssid" => bstr .size (1..32),
+    ? "rssi" => int,
+}
+
+; ---- .prov/scan — Wi-Fi AP scan (blocking) with paginated results --------
+
+scan-req = scan-start / scan-get-status / scan-get-results
+scan-start = [op-scan-start, scan-params]
+scan-get-status = [op-scan-status]
+scan-get-results = [op-scan-results, start: uint, count: uint]
+op-scan-start = 0
+op-scan-status = 1
+op-scan-results = 2
+
+scan-params = {
+    ? "passive" => bool,
+    ? "period-ms" => uint,
+}
+
+scan-rsp = scan-start-rsp / scan-status-rsp / scan-results-rsp
+scan-start-rsp = [op-scan-start, prov-status]
+scan-status-rsp = [op-scan-status, prov-status, finished: bool, total: uint]
+scan-results-rsp = [op-scan-results, prov-status, [* scan-entry]]
+
+scan-entry = {
+    "ssid" => bstr .size (0..32),
+    "bssid" => bstr .size 6,
+    "ch" => uint,
+    "rssi" => int,
+    "auth" => uint,           ; Zephyr wifi_security_type value
+}
+
+; ---- .prov/cred — cloud credential bootstrap (chunked DER writes) ---------
+; op 3 is RESERVED for a phase-2 CSR flow.
+
+cred-kind = cred-device-cert / cred-private-key / cred-ca-cert
+cred-device-cert = 0
+cred-private-key = 1
+cred-ca-cert = 2
+
+cred-req = cred-write / cred-finalize / cred-get-status
+cred-write = [op-cred-write, cred-chunk]
+cred-finalize = [op-cred-finalize]
+cred-get-status = [op-cred-status]
+op-cred-write = 0
+op-cred-finalize = 1
+op-cred-status = 2
+
+cred-chunk = {
+    "kind" => cred-kind,
+    "off" => uint,
+    "total" => uint,          ; total DER length for this kind
+    "data" => bstr,           ; chunk, sized to fit one pouch entry
+}
+
+cred-rsp = cred-write-rsp / cred-finalize-rsp / cred-status-rsp
+cred-write-rsp = [op-cred-write, prov-status, received: uint]
+cred-finalize-rsp = [op-cred-finalize, prov-status]
+cred-status-rsp = [op-cred-status, prov-status, {* tstr => uint}]
+                  ; keys "0"/"1"/"2" (cred-kind as text) => stored DER length
+
+; ---- .prov/ctrl -----------------------------------------------------------
+
+ctrl-req = ctrl-reset / ctrl-reprovision / ctrl-end
+ctrl-reset = [op-ctrl-reset]
+ctrl-reprovision = [op-ctrl-reprov]
+ctrl-end = [op-ctrl-end]
+op-ctrl-reset = 0
+op-ctrl-reprov = 1
+op-ctrl-end = 2
+
+ctrl-rsp = [ctrl-op, prov-status]
+ctrl-op = uint .le 2

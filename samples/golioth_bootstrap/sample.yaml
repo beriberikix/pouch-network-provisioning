@@ -1,0 +1,13 @@
+sample:
+  name: Golioth zero-touch bootstrap
+  description: >
+    Blank device provisions Wi-Fi + a Golioth device certificate over pouch,
+    then connects to Golioth with certificate auth.
+tests:
+  sample.pouch_prov.golioth_bootstrap:
+    build_only: true
+    platform_allow:
+      - esp32s3_devkitc/esp32s3/procpu
+      - nrf7002dk/nrf5340/cpuapp
+    tags:
+      - pouch_prov

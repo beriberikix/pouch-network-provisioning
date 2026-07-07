@@ -1,0 +1,111 @@
+# Copyright (c) 2026 Jonathan Beri
+# SPDX-License-Identifier: Apache-2.0
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  ztest:
+    name: Device tests (native_sim)
+    runs-on: ubuntu-latest
+    container: ghcr.io/zephyrproject-rtos/ci:v0.28.4
+    env:
+      ZEPHYR_TOOLCHAIN_VARIANT: zephyr
+      ZEPHYR_SDK_INSTALL_DIR: /opt/toolchains
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          path: pouch-network-provisioning
+
+      - name: West init + update (skip sample-only deps)
+        run: |
+          west init -l pouch-network-provisioning
+          # Skip the Golioth SDK (samples group) — not needed for ztests and
+          # pulls large submodules. zephyr's allowlisted modules still come in.
+          west config manifest.group-filter -- -samples
+          west update --narrow -o=--depth=1
+          west zephyr-export
+
+      - name: Install twister Python deps
+        run: pip3 install -r zephyr/scripts/requirements.txt
+
+      - name: Twister — ztest suites
+        run: |
+          west twister -T pouch-network-provisioning/tests \
+            -p native_sim --inline-logs -v --outdir twister-ztest
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: twister-ztest
+          path: twister-ztest/twister.xml
+          if-no-files-found: ignore
+
+  build:
+    name: Sample builds
+    runs-on: ubuntu-latest
+    container: ghcr.io/zephyrproject-rtos/ci:v0.28.4
+    env:
+      ZEPHYR_TOOLCHAIN_VARIANT: zephyr
+      ZEPHYR_SDK_INSTALL_DIR: /opt/toolchains
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          path: pouch-network-provisioning
+
+      - name: West init + update (with sample deps)
+        run: |
+          west init -l pouch-network-provisioning
+          west update --narrow -o=--depth=1
+          west zephyr-export
+          west blobs fetch hal_espressif
+
+      - name: Install twister + pouch Python deps
+        run: |
+          pip3 install -r zephyr/scripts/requirements.txt
+          pip3 install -r modules/lib/pouch/requirements.txt  # zcbor (pouch build)
+
+      - name: Build samples (esp32s3)
+        run: |
+          west twister -T pouch-network-provisioning/samples \
+            -p esp32s3_devkitc/esp32s3/procpu --build-only \
+            --inline-logs -v --outdir twister-build
+
+  cli:
+    name: CLI (pytest + ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Install + check
+        run: |
+          uv venv
+          uv pip install -e "cli[dev]"
+          .venv/bin/ruff check cli/src cli/tests
+          .venv/bin/pytest cli
+
+  codegen:
+    name: Generated code in sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Regenerate zcbor codec + vectors and diff
+        run: |
+          uv venv
+          uv pip install "zcbor==0.9.1" "cbor2>=5.6,<5.7" cryptography click
+          rm -rf src/codec
+          .venv/bin/zcbor code -c cddl/prov.cddl -d -e --default-max-qty 8 \
+            -t ver-req ver-rsp auth-req auth-rsp config-req config-rsp \
+               scan-req scan-rsp cred-req cred-rsp ctrl-req ctrl-rsp \
+            --output-c src/codec/prov.c --output-h src/codec/include/prov.h
+          .venv/bin/python scripts/gen_vectors.py
+          .venv/bin/python scripts/vectors_to_c.py
+          git diff --exit-code -- src/codec tests/vectors tests/codec/src/vectors.inc \
+            || (echo "::error::Generated code is out of date; run zcbor + scripts/gen_vectors.py + scripts/vectors_to_c.py" && exit 1)

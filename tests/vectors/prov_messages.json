@@ -1,0 +1,39 @@
+{
+  "requests": {
+    "ver_req": "8100",
+    "auth_challenge": "820050000102030405060708090a0b0c0d0e0f",
+    "auth_proof": "82015820000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "config_get_status": "8100",
+    "config_set_full": "8201a46473736964466d797373696464706173734868756e746572323265627373696446a1b2c3d4e5f66263680b",
+    "config_set_minimal": "8201a16473736964486f70656e2d6e6574",
+    "config_apply": "8102",
+    "scan_start_defaults": "8200a0",
+    "scan_start_passive": "8200a26770617373697665f569706572696f642d6d731878",
+    "scan_get_status": "8101",
+    "scan_get_results": "83020406",
+    "cred_write": "8200a4646b696e6400636f66660065746f74616c0664646174614630820102aabb",
+    "cred_finalize": "8101",
+    "cred_get_status": "8102",
+    "ctrl_reset": "8100",
+    "ctrl_reprov": "8101",
+    "ctrl_end": "8102"
+  },
+  "responses": {
+    "ver_rsp": "830000a56570726f746f016463617073846477696669647363616e6463726564646175746863626c6b190200636c696265302e312e3063706f70f5",
+    "auth_challenge_rsp": "84000050101112131415161718191a1b1c1d1e1f5820202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+    "auth_proof_rsp": "820100",
+    "auth_proof_rsp_unauthorized": "820104",
+    "config_status_connecting": "83000001",
+    "config_status_failed_auth": "8400000300",
+    "config_status_connected": "84000000a36369703444c0a801076473736964466d797373696464727373693828",
+    "config_set_rsp": "820100",
+    "config_apply_rsp": "820200",
+    "scan_start_rsp": "820000",
+    "scan_status_rsp": "840100f509",
+    "scan_results_rsp": "83020082a56473736964466d797373696465627373696446a1b2c3d4e5f66263680b64727373693828646175746801a56473736964456775657374656273736964460611223344ff6263680164727373693848646175746800",
+    "cred_write_rsp": "83000006",
+    "cred_finalize_rsp": "820100",
+    "cred_status_rsp": "830200a2613019041261311879",
+    "ctrl_end_rsp": "820200"
+  }
+}

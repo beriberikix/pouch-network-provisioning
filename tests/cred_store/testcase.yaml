@@ -1,0 +1,7 @@
+tests:
+  pouch_prov.cred_store:
+    platform_allow:
+      - native_sim
+    tags:
+      - pouch_prov
+      - cred

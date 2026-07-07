@@ -1,0 +1,106 @@
+# Copyright (c) 2026 Jonathan Beri
+# SPDX-License-Identifier: Apache-2.0
+
+menuconfig POUCH_PROV
+	bool "Pouch network provisioning"
+	depends on POUCH
+	depends on POUCH_TRANSPORT_BLE_GATT
+	depends on BT_PERIPHERAL
+	select EVENTS
+	# pouch's GATT characteristics require an encrypted (LESC) link for
+	# writes; without SMP the client can never pair and writes are dropped.
+	select BT_SMP
+	help
+	  Local network provisioning over the pouch protocol. Provisioning
+	  messages are pouch entries on reserved ".prov/*" paths, carried over
+	  pouch's BLE GATT transport. The session is terminated locally by a
+	  provisioning client (CLI or mobile app) acting in the pouch server
+	  role. Production builds must select POUCH_ENCRYPTION_SAEAD (a choice
+	  symbol, so it cannot be selected from here).
+
+if POUCH_PROV
+
+config POUCH_PROV_WIFI
+	bool "Wi-Fi provisioning endpoints"
+	default y
+	select EXPERIMENTAL
+	depends on WIFI
+	select WIFI_CREDENTIALS
+	select NET_MGMT
+	select NET_MGMT_EVENT
+	help
+	  Enable the .prov/config, .prov/scan and .prov/ctrl endpoints for
+	  Wi-Fi station provisioning.
+
+config POUCH_PROV_CRED
+	bool "Cloud credential bootstrap endpoint (.prov/cred)"
+	default y
+	depends on SETTINGS
+	help
+	  Accept a device certificate, private key and optional CA certificate
+	  over the encrypted provisioning session and persist them via the
+	  settings subsystem for use by the application (e.g. with the Golioth
+	  Firmware SDK for certificate-based zero-touch enrollment).
+
+config POUCH_PROV_IDENTITY
+	bool "Generate ephemeral device identity on first boot"
+	default y if POUCH_ENCRYPTION_SAEAD
+	depends on SETTINGS
+	select MBEDTLS
+	select MBEDTLS_X509_CRT_WRITE_C
+	select MBEDTLS_PK_WRITE_C
+	select PSA_WANT_KEY_TYPE_ECC_KEY_PAIR_GENERATE
+	select PSA_WANT_KEY_TYPE_ECC_KEY_PAIR_DERIVE
+	select PSA_WANT_ALG_ECDH
+	select PSA_WANT_ALG_ECDSA
+	select PSA_WANT_ECC_SECP_R1_256
+	select PSA_WANT_ALG_SHA_256
+	help
+	  On first boot, generate a P-256 key pair and a self-signed X.509
+	  certificate to serve as the device's pouch identity, and persist
+	  them via the settings subsystem. Required for blank devices that
+	  have no factory-provisioned pouch credentials.
+
+config POUCH_PROV_AUTH
+	bool "Proof-of-possession session authorization (.prov/auth)"
+	default y
+	select PSA_WANT_ALG_HMAC
+	select PSA_WANT_KEY_TYPE_HMAC
+	select PSA_WANT_ALG_SHA_256
+	help
+	  Require a mutual HMAC-SHA256 proof-of-possession challenge-response
+	  inside the encrypted pouch session before accepting provisioning
+	  commands. The PoP secret is supplied by the application at init.
+
+config POUCH_PROV_RESPONSE_WAIT_MS
+	int "Response wait budget for an uplink pouch (ms)"
+	default 12000
+	help
+	  How long the uplink handler waits for pending responses before
+	  closing an uplink pouch empty (the client treats an empty pouch
+	  as "retry later").
+
+config POUCH_PROV_SCAN_CACHE
+	int "Maximum cached Wi-Fi scan results"
+	default 16
+
+config POUCH_PROV_AUTOSTOP_TIMEOUT_S
+	int "Auto-stop timeout after provisioning completes (seconds)"
+	default 0
+	help
+	  0 disables auto-stop; the application stops the manager explicitly.
+
+config POUCH_PROV_DEVICE_NAME_PREFIX
+	string "BLE device name prefix"
+	default "PVN-"
+	help
+	  Advertised name is this prefix plus the last three bytes of the
+	  Bluetooth device address in hex.
+
+module = POUCH_PROV
+module-str = pouch_prov
+source "subsys/logging/Kconfig.template.log_config"
+
+endif # POUCH_PROV
+
+rsource "sim/wifi/Kconfig"

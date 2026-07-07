@@ -1,0 +1,45 @@
+# Copyright (c) 2026 Jonathan Beri
+# SPDX-License-Identifier: Apache-2.0
+#
+# West manifest for developing pouch-network-provisioning standalone.
+# Downstream users add this repo as a project in their own manifest instead.
+manifest:
+  self:
+    path: pouch-network-provisioning
+
+  remotes:
+    - name: zephyrproject
+      url-base: https://github.com/zephyrproject-rtos
+    - name: golioth
+      url-base: https://github.com/golioth
+
+  projects:
+    # Same Zephyr revision pouch pins (pouch west-zephyr.yml).
+    - name: zephyr
+      remote: zephyrproject
+      revision: v4.3.0
+      import:
+        name-allowlist:
+          - cmsis_6
+          - hal_espressif
+          - hal_nordic
+          - hal_nxp
+          - littlefs
+          - mbedtls
+          - mcuboot
+          - net-tools
+          - segger
+          - tinycrypt
+          - zcbor
+    - name: pouch
+      remote: golioth
+      revision: 18ae45883ce23eb1e0de0dc87ee81dbb9c983043
+      path: modules/lib/pouch
+    # Only needed by samples/golioth_bootstrap.
+    - name: golioth-firmware-sdk
+      remote: golioth
+      revision: 1996a1d3b73fe5df39b5780f53f6ed091c1a82db
+      path: modules/lib/golioth-firmware-sdk
+      submodules: true
+      groups:
+        - samples

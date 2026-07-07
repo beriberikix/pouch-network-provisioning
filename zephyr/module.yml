@@ -1,0 +1,8 @@
+name: pouch_network_provisioning
+build:
+  cmake: .
+  kconfig: Kconfig
+samples:
+  - samples
+tests:
+  - tests
