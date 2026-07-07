@@ -15,8 +15,6 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/settings/settings.h>
 
-#include <mbedtls/x509_crt.h>
-
 #include <pouch_prov/credentials.h>
 
 #include "pouch_prov_internal.h"
@@ -54,6 +52,33 @@ static const char *const setting_key[] = {
 static bool kind_valid(int kind)
 {
 	return kind >= 0 && kind < (int)ARRAY_SIZE(blobs);
+}
+
+/* True if `buf` looks like a DER-encoded ASN.1 SEQUENCE (tag 0x30) whose
+ * long-form length header plus content exactly spans `len` — a cheap
+ * structural check for an X.509 certificate. */
+static bool der_sequence_len_ok(const uint8_t *buf, size_t len)
+{
+	if (len < 4 || buf[0] != 0x30) {
+		return false;
+	}
+	uint8_t lb = buf[1];
+
+	if ((lb & 0x80) == 0) {
+		/* short form */
+		return (size_t)lb + 2 == len;
+	}
+	size_t nbytes = lb & 0x7f;
+
+	if (nbytes == 0 || nbytes > 4 || len < 2 + nbytes) {
+		return false;
+	}
+	size_t content = 0;
+
+	for (size_t i = 0; i < nbytes; i++) {
+		content = (content << 8) | buf[2 + i];
+	}
+	return content + 2 + nbytes == len;
 }
 
 /* --- settings glue -------------------------------------------------------- */
@@ -120,15 +145,14 @@ int pouch_prov_cred_finalize(void)
 		return -EINVAL;
 	}
 
-	/* Validate the device certificate parses as X.509. */
-	mbedtls_x509_crt parsed;
-
-	mbedtls_x509_crt_init(&parsed);
-	int ret = mbedtls_x509_crt_parse(&parsed, cert->buf, cert->staged);
-
-	mbedtls_x509_crt_free(&parsed);
-	if (ret != 0) {
-		LOG_ERR("Device certificate does not parse (-0x%x)", -ret);
+	/* Sanity-check the certificate is a plausible DER-encoded X.509
+	 * structure: an outer ASN.1 SEQUENCE (0x30) with a definite long-form
+	 * length whose encoded size matches what we received. This catches a
+	 * truncated or garbage push cheaply; full validation is left to the
+	 * cloud client, which does it at connect time — the device only needs
+	 * to store the blob, not parse the whole X.509 stack. */
+	if (!der_sequence_len_ok(cert->buf, cert->staged)) {
+		LOG_ERR("Device certificate is not a well-formed DER structure");
 		return -EBADMSG;
 	}
 

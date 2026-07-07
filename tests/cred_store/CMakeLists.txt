@@ -10,10 +10,6 @@ target_sources(app PRIVATE src/main.c ${ROOT}/src/cred_store.c)
 target_include_directories(app PRIVATE
   ${ROOT}/src ${ROOT}/src/codec/include ${ROOT}/include
 )
-# mbedtls_user_config.h (CONFIG_MBEDTLS_USER_CONFIG_FILE) is included by the
-# mbedTLS *library* build, so it must be on the global include path, not just
-# the app's.
-zephyr_include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(app PRIVATE
   CONFIG_POUCH_PROV_LOG_LEVEL=3
   CONFIG_POUCH_PROV_CRED=1
