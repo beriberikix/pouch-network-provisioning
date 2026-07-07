@@ -23,6 +23,20 @@
 /** Response payload ceiling: fits one pouch entry in a 512-byte block. */
 #define POUCH_PROV_MSG_MAX 384
 
+/* Operation codes (cddl/prov.cddl). zcbor does not emit these as constants. */
+#define OP_CONFIG_STATUS 0
+#define OP_CONFIG_SET    1
+#define OP_CONFIG_APPLY  2
+#define OP_SCAN_START    0
+#define OP_SCAN_STATUS   1
+#define OP_SCAN_RESULTS  2
+#define OP_CRED_WRITE    0
+#define OP_CRED_FINALIZE 1
+#define OP_CRED_STATUS   2
+#define OP_CTRL_RESET    0
+#define OP_CTRL_REPROV   1
+#define OP_CTRL_END      2
+
 /**
  * Endpoint request handler.
  *
@@ -74,3 +88,22 @@ int pouch_prov_handle_auth(const uint8_t *req, size_t req_len, uint8_t *rsp, siz
 			   size_t *rsp_len);
 /* Reset per-connection auth state (called on disconnect). */
 void pouch_prov_auth_reset(void);
+
+#if defined(CONFIG_POUCH_PROV_WIFI)
+int pouch_prov_handle_config(const uint8_t *req, size_t req_len, uint8_t *rsp, size_t rsp_size,
+			     size_t *rsp_len);
+int pouch_prov_handle_scan(const uint8_t *req, size_t req_len, uint8_t *rsp, size_t rsp_size,
+			   size_t *rsp_len);
+int pouch_prov_handle_ctrl(const uint8_t *req, size_t req_len, uint8_t *rsp, size_t rsp_size,
+			   size_t *rsp_len);
+
+int pouch_prov_wifi_config_init(uint32_t conn_attempts);
+int pouch_prov_wifi_scan_init(void);
+void pouch_prov_wifi_config_reset(void);
+bool pouch_prov_wifi_is_provisioned(void);
+
+/* ctrl helpers */
+void pouch_prov_wifi_reset_state(void);  /* reset SM without wiping creds */
+void pouch_prov_wifi_reprovision(void);  /* wipe stored Wi-Fi credentials + reset */
+void pouch_prov_ctrl_end_requested(void); /* manager: client is done */
+#endif

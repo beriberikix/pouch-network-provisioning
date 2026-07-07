@@ -31,7 +31,13 @@ static const struct pouch_prov_endpoint endpoints[] = {
 #if defined(CONFIG_POUCH_PROV_AUTH)
 	{ .path = POUCH_PROV_PATH_AUTH, .handler = pouch_prov_handle_auth, .require_auth = false },
 #endif
-	/* .prov/config, .prov/scan (M4), .prov/cred (M5), .prov/ctrl land next. */
+#if defined(CONFIG_POUCH_PROV_WIFI)
+	{ .path = POUCH_PROV_PATH_CONFIG, .handler = pouch_prov_handle_config,
+	  .require_auth = true },
+	{ .path = POUCH_PROV_PATH_SCAN, .handler = pouch_prov_handle_scan, .require_auth = true },
+	{ .path = POUCH_PROV_PATH_CTRL, .handler = pouch_prov_handle_ctrl, .require_auth = true },
+#endif
+	/* .prov/cred (M5) lands next. */
 };
 
 static struct {

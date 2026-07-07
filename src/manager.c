@@ -104,6 +104,11 @@ int pouch_prov_mgr_init(const struct pouch_prov_config *cfg)
 		return err;
 	}
 
+#if defined(CONFIG_POUCH_PROV_WIFI)
+	(void)pouch_prov_wifi_config_init(config.wifi_conn_attempts);
+	(void)pouch_prov_wifi_scan_init();
+#endif
+
 	initialized = true;
 
 	return 0;
@@ -171,8 +176,16 @@ int pouch_prov_mgr_stop(void)
 
 bool pouch_prov_mgr_is_provisioned(void)
 {
-	/* Wi-Fi credential presence check lands with the M4 handlers. */
+#if defined(CONFIG_POUCH_PROV_WIFI)
+	return pouch_prov_wifi_is_provisioned();
+#else
 	return false;
+#endif
+}
+
+void pouch_prov_ctrl_end_requested(void)
+{
+	(void)pouch_prov_mgr_stop();
 }
 
 int pouch_prov_mgr_wait(k_timeout_t timeout)
@@ -184,7 +197,9 @@ int pouch_prov_mgr_wait(k_timeout_t timeout)
 
 int pouch_prov_mgr_reset(void)
 {
-	/* Credential wipe lands with the M4/M5 handlers. */
+#if defined(CONFIG_POUCH_PROV_WIFI)
+	pouch_prov_wifi_reprovision();
+#endif
 	pouch_prov_dispatch_reset();
 	pouch_prov_rpc_reset();
 

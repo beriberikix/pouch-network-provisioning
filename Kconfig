@@ -102,3 +102,5 @@ module-str = pouch_prov
 source "subsys/logging/Kconfig.template.log_config"
 
 endif # POUCH_PROV
+
+rsource "sim/wifi/Kconfig"

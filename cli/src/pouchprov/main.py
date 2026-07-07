@@ -9,7 +9,7 @@ import logging
 
 import click
 
-from . import codec
+from . import codec, flows
 from .session import ProvSession
 from .transport import ble
 
@@ -61,6 +61,51 @@ def version(name: str | None) -> None:
             click.echo(f"caps:     {', '.join(info.caps)}")
             click.echo(f"block:    {info.block_size}")
             click.echo(f"pop:      {'required' if info.pop_required else 'not required'}")
+
+    asyncio.run(run())
+
+
+@cli.command("wifi-scan")
+@click.option("--name", "-n", default=None, help="Device name/address (default: auto-select).")
+@click.option("--pop", default=None, help="Proof-of-possession secret.")
+def wifi_scan(name: str | None, pop: str | None) -> None:
+    """Scan for Wi-Fi networks visible to the device."""
+
+    async def run() -> None:
+        async with ble.BleTransport(name) as transport:
+            session = ProvSession(transport, maxlen=transport.att_payload)
+            info = await flows.get_version(session)
+            await flows.authorize_if_needed(session, info, pop)
+            for e in await flows.scan(session):
+                click.echo(f"{e.ssid.decode(errors='replace'):<32} "
+                           f"ch={e.channel:<3} rssi={e.rssi:<4} auth={e.auth}")
+
+    asyncio.run(run())
+
+
+@cli.command()
+@click.option("--name", "-n", default=None, help="Device name/address (default: auto-select).")
+@click.option("--pop", default=None, help="Proof-of-possession secret.")
+@click.option("--ssid", required=True, help="Wi-Fi SSID to provision.")
+@click.option("--password", default=None, help="Wi-Fi passphrase (omit for open networks).")
+def provision(name: str | None, pop: str | None, ssid: str, password: str | None) -> None:
+    """Provision Wi-Fi credentials onto the device."""
+
+    async def run() -> None:
+        async with ble.BleTransport(name) as transport:
+            session = ProvSession(transport, maxlen=transport.att_payload)
+            info = await flows.get_version(session)
+            await flows.authorize_if_needed(session, info, pop)
+            status = await flows.configure_wifi(
+                session, ssid.encode(), password.encode() if password else None
+            )
+            if status.state == codec.StaState.CONNECTED:
+                ip = ".".join(str(b) for b in status.ip4) if status.ip4 else "?"
+                click.echo(f"connected: {status.ssid.decode(errors='replace')} ({ip})")
+                await flows.end_session(session)
+            else:
+                reason = status.fail_reason.name if status.fail_reason is not None else "unknown"
+                raise SystemExit(f"provisioning failed: {reason}")
 
     asyncio.run(run())
 
