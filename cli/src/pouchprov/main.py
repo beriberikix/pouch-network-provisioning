@@ -88,14 +88,37 @@ def wifi_scan(name: str | None, pop: str | None) -> None:
 @click.option("--pop", default=None, help="Proof-of-possession secret.")
 @click.option("--ssid", required=True, help="Wi-Fi SSID to provision.")
 @click.option("--password", default=None, help="Wi-Fi passphrase (omit for open networks).")
-def provision(name: str | None, pop: str | None, ssid: str, password: str | None) -> None:
-    """Provision Wi-Fi credentials onto the device."""
+@click.option("--cert", type=click.Path(exists=True), default=None,
+              help="Device certificate (PEM or DER) to bootstrap.")
+@click.option("--key", type=click.Path(exists=True), default=None,
+              help="Device private key (PEM or DER) to bootstrap.")
+@click.option("--ca", type=click.Path(exists=True), default=None,
+              help="CA certificate (PEM or DER) to bootstrap.")
+def provision(name: str | None, pop: str | None, ssid: str, password: str | None,
+              cert: str | None, key: str | None, ca: str | None) -> None:
+    """Provision Wi-Fi credentials (and optionally cloud certificates)."""
+    from pathlib import Path
+
+    from .pouchlink import cert as certmod
+
+    if bool(cert) ^ bool(key):
+        raise click.UsageError("--cert and --key must be provided together")
 
     async def run() -> None:
         async with ble.BleTransport(name) as transport:
             session = ProvSession(transport, maxlen=transport.att_payload)
             info = await flows.get_version(session)
             await flows.authorize_if_needed(session, info, pop)
+
+            if cert:
+                await flows.bootstrap_credentials(
+                    session,
+                    certmod.pem_to_der(Path(cert).read_bytes()),
+                    certmod.pem_to_der(Path(key).read_bytes()),
+                    certmod.pem_to_der(Path(ca).read_bytes()) if ca else None,
+                )
+                click.echo("cloud credentials stored")
+
             status = await flows.configure_wifi(
                 session, ssid.encode(), password.encode() if password else None
             )

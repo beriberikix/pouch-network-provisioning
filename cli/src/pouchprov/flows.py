@@ -78,6 +78,36 @@ async def configure_wifi(session: ProvSession, ssid: bytes, password: bytes | No
         await asyncio.sleep(1.0)
 
 
+async def push_credential(session: ProvSession, kind: codec.CredKind, der: bytes,
+                          chunk: int = 256) -> None:
+    """Write one DER credential to the device in ordered chunks."""
+    total = len(der)
+    off = 0
+    while off < total:
+        piece = der[off:off + chunk]
+        received = codec.decode_cred_write_rsp(
+            await session.request(
+                codec.PATH_CRED, codec.encode_cred_write(kind, off, total, piece)
+            )
+        )
+        off += len(piece)
+        if received != off:
+            raise RuntimeError(f"cred write desync: device has {received}, sent {off}")
+
+
+async def bootstrap_credentials(session: ProvSession, cert_der: bytes, key_der: bytes,
+                                ca_der: bytes | None = None) -> None:
+    """Push device cert + key (+ optional CA), then finalize."""
+    await push_credential(session, codec.CredKind.DEVICE_CERT, cert_der)
+    await push_credential(session, codec.CredKind.PRIVATE_KEY, key_der)
+    if ca_der is not None:
+        await push_credential(session, codec.CredKind.CA_CERT, ca_der)
+    codec.decode_cred_finalize_rsp(
+        await session.request(codec.PATH_CRED, codec.encode_cred_finalize())
+    )
+    logger.info("cloud credentials stored")
+
+
 async def end_session(session: ProvSession) -> None:
     codec.decode_ctrl_rsp(
         await session.request(codec.PATH_CTRL, codec.encode_ctrl(codec.CtrlOp.END)),

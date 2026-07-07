@@ -87,7 +87,7 @@ int pouch_prov_mgr_init(const struct pouch_prov_config *cfg)
 	 * previously generated certificate is restored. */
 	if (IS_ENABLED(CONFIG_SETTINGS)) {
 		(void)settings_subsys_init();
-		(void)settings_load_subtree("pnp/id");
+		(void)settings_load_subtree("pnp"); /* identity + bootstrapped creds */
 	}
 	err = pouch_prov_identity_ensure(&pouch_cfg.certificate, &pouch_cfg.private_key);
 	if (err != 0) {

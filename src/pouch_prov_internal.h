@@ -107,3 +107,13 @@ void pouch_prov_wifi_reset_state(void);  /* reset SM without wiping creds */
 void pouch_prov_wifi_reprovision(void);  /* wipe stored Wi-Fi credentials + reset */
 void pouch_prov_ctrl_end_requested(void); /* manager: client is done */
 #endif
+
+#if defined(CONFIG_POUCH_PROV_CRED)
+int pouch_prov_handle_cred(const uint8_t *req, size_t req_len, uint8_t *rsp, size_t rsp_size,
+			   size_t *rsp_len);
+/* cred_store.c */
+int pouch_prov_cred_stage(int kind, uint32_t offset, uint32_t total, const uint8_t *data,
+			  size_t data_len);
+int pouch_prov_cred_finalize(void);
+size_t pouch_prov_cred_received(int kind);
+#endif

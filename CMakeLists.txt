@@ -27,7 +27,10 @@ zephyr_library_sources_ifdef(CONFIG_POUCH_PROV_WIFI
   src/handlers/ctrl.c
 )
 
-# M5:  src/cred_store.c src/handlers/cred.c
+zephyr_library_sources_ifdef(CONFIG_POUCH_PROV_CRED
+  src/cred_store.c
+  src/handlers/cred.c
+)
 
 endif()
 
