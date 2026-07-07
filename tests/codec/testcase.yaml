@@ -1,0 +1,6 @@
+tests:
+  pouch_prov.codec:
+    platform_allow:
+      - native_sim
+    tags:
+      - pouch_prov
