@@ -4,15 +4,19 @@
  *
  * BabbleSim central tester: scans for the provisioning advertisement,
  * connects, pairs (Just Works LESC — the peripheral sends the Security
- * Request per src/adv.c), discovers the pouch GATT service, and
- * subscribes to the uplink characteristic. Each stage prints a
- * "PROV_BSIM:" marker that pytest/test_ble_smoke.py asserts in order;
- * a timeout prints "PROV_BSIM: FAIL <stage>" so failures are diagnosable
- * from the simulation log.
+ * Request per src/adv.c), discovers the pouch GATT service, and then
+ * performs a .prov/ver RPC round trip over the pouch SAR transport:
+ * request pouch written to the downlink characteristic, response pouch
+ * received via uplink notifications. Each stage prints a "PROV_BSIM:"
+ * marker that pytest/test_ble_smoke.py asserts; failures print
+ * "PROV_BSIM: FAIL <stage>" so they are diagnosable from the log.
  *
  * Wire-format constants are intentionally redefined here (rather than
- * pulled from pouch headers) so the test pins the advertised format the
- * pouchprov CLI and future mobile SDKs rely on.
+ * pulled from pouch headers) so the test pins the format the pouchprov
+ * CLI and future mobile SDKs rely on. The SAR client below mirrors
+ * cli/src/pouchprov/pouchlink/sar.py; the request frame bytes are the
+ * golden vector shared with the CLI tests (tests/codec/src/vectors.inc,
+ * generated from tests/vectors/pouch_frames.json).
  */
 
 #include <string.h>
@@ -25,6 +29,8 @@
 #include <zephyr/kernel.h>
 #include <zephyr/sys/byteorder.h>
 #include <zephyr/sys/printk.h>
+
+#include "vectors.inc" /* frame_single_entry: pouch frame with a .prov/ver request */
 
 /* Pouch GATT service (16-bit) and characteristic (128-bit) UUIDs, from
  * pouch port/zephyr/transport/gatt/common.h.
@@ -45,13 +51,37 @@ static const struct bt_uuid_128 info_uuid =
 
 #define DEVICE_NAME_PREFIX "PVN-"
 
+/* Pouch SAR wire format (pouch src/transport/sar/packet.{h,c}).
+ * TX packet: [flags, seq] + fragment; FIN packet: [FLAG_FIN, code].
+ * ACK packet: [code, last in-order seq (0xFF before any), window].
+ */
+#define SAR_FLAG_FIRST 0x01
+#define SAR_FLAG_LAST  0x02
+#define SAR_FLAG_FIN   0x04
+#define SAR_CODE_ACK   0x00
+#define SAR_ACK_LEN    3
+#define SAR_SEQ_NONE   0xFF
+#define SAR_WINDOW     8
+
 static K_SEM_DEFINE(sem_found, 0, 1);
 static K_SEM_DEFINE(sem_connected, 0, 1);
 static K_SEM_DEFINE(sem_secured, 0, 1);
 static K_SEM_DEFINE(sem_discovered, 0, 1);
 static K_SEM_DEFINE(sem_subscribed, 0, 1);
+static K_SEM_DEFINE(sem_written, 0, 1);
 
 static struct bt_conn *default_conn;
+static uint8_t last_write_err;
+
+/* Incoming downlink notifications (SAR ACKs from the device's receiver). */
+K_MSGQ_DEFINE(dl_ack_q, SAR_ACK_LEN, 4, 1);
+
+/* Incoming uplink notifications (SAR TX packets from the device's sender). */
+struct ul_pkt {
+	uint16_t len;
+	uint8_t data[251];
+};
+K_MSGQ_DEFINE(ul_pkt_q, sizeof(struct ul_pkt), 8, 1);
 
 struct adv_result {
 	bool svc_data_ok;
@@ -159,6 +189,7 @@ BT_CONN_CB_DEFINE(conn_callbacks) = {
 static struct bt_gatt_discover_params disc_params;
 static uint16_t svc_end_handle;
 static uint16_t uplink_value_handle;
+static uint16_t downlink_value_handle;
 static bool found_uplink, found_downlink, found_info;
 
 static uint8_t discover_cb(struct bt_conn *conn, const struct bt_gatt_attr *attr,
@@ -207,6 +238,7 @@ static uint8_t discover_cb(struct bt_conn *conn, const struct bt_gatt_attr *attr
 		uplink_value_handle = chrc->value_handle;
 	} else if (bt_uuid_cmp(chrc->uuid, &downlink_uuid.uuid) == 0) {
 		found_downlink = true;
+		downlink_value_handle = chrc->value_handle;
 	} else if (bt_uuid_cmp(chrc->uuid, &info_uuid.uuid) == 0) {
 		found_info = true;
 	}
@@ -214,15 +246,28 @@ static uint8_t discover_cb(struct bt_conn *conn, const struct bt_gatt_attr *attr
 	return BT_GATT_ITER_CONTINUE;
 }
 
-static struct bt_gatt_subscribe_params sub_params;
-static struct bt_gatt_discover_params ccc_disc_params;
+static uint8_t downlink_notify_cb(struct bt_conn *conn, struct bt_gatt_subscribe_params *params,
+				  const void *data, uint16_t length)
+{
+	if (data != NULL && length == SAR_ACK_LEN) {
+		(void)k_msgq_put(&dl_ack_q, data, K_NO_WAIT);
+	}
+
+	return BT_GATT_ITER_CONTINUE;
+}
 
 static uint8_t uplink_notify_cb(struct bt_conn *conn, struct bt_gatt_subscribe_params *params,
 				const void *data, uint16_t length)
 {
-	if (data != NULL) {
-		printk("PROV_BSIM: uplink notification (%u bytes)\n", length);
+	struct ul_pkt pkt;
+
+	if (data == NULL || length > sizeof(pkt.data)) {
+		return BT_GATT_ITER_CONTINUE;
 	}
+
+	pkt.len = length;
+	memcpy(pkt.data, data, length);
+	(void)k_msgq_put(&ul_pkt_q, &pkt, K_NO_WAIT);
 
 	return BT_GATT_ITER_CONTINUE;
 }
@@ -238,6 +283,11 @@ static void subscribe_cb(struct bt_conn *conn, uint8_t err,
 	k_sem_give(&sem_subscribed);
 }
 
+static struct bt_gatt_subscribe_params dl_sub_params;
+static struct bt_gatt_discover_params dl_ccc_disc_params;
+static struct bt_gatt_subscribe_params ul_sub_params;
+static struct bt_gatt_discover_params ul_ccc_disc_params;
+
 static int wait_stage(struct k_sem *sem, const char *stage)
 {
 	if (k_sem_take(sem, K_SECONDS(30)) != 0) {
@@ -248,8 +298,205 @@ static int wait_stage(struct k_sem *sem, const char *stage)
 	return 0;
 }
 
+static int subscribe(struct bt_gatt_subscribe_params *params,
+		     struct bt_gatt_discover_params *ccc_disc, uint16_t value_handle,
+		     bt_gatt_notify_func_t notify, const char *stage)
+{
+	memset(params, 0, sizeof(*params));
+	params->notify = notify;
+	params->subscribe = subscribe_cb;
+	params->value = BT_GATT_CCC_NOTIFY;
+	params->value_handle = value_handle;
+	params->ccc_handle = 0; /* auto-discover via disc_params */
+	params->disc_params = ccc_disc;
+	params->end_handle = svc_end_handle;
+
+	int err = bt_gatt_subscribe(default_conn, params);
+
+	if (err != 0) {
+		printk("PROV_BSIM: FAIL %s_subscribe_req (%d)\n", stage, err);
+		return err;
+	}
+
+	return wait_stage(&sem_subscribed, stage);
+}
+
+static void write_cb(struct bt_conn *conn, uint8_t err, struct bt_gatt_write_params *params)
+{
+	last_write_err = err;
+	k_sem_give(&sem_written);
+}
+
+static int gatt_write_sync(uint16_t handle, const void *data, uint16_t len)
+{
+	static struct bt_gatt_write_params wp;
+
+	wp.func = write_cb;
+	wp.handle = handle;
+	wp.offset = 0;
+	wp.data = data;
+	wp.length = len;
+
+	int err = bt_gatt_write(default_conn, &wp);
+
+	if (err != 0) {
+		return err;
+	}
+	if (wait_stage(&sem_written, "write") != 0) {
+		return -ETIMEDOUT;
+	}
+
+	return last_write_err == 0 ? 0 : -EIO;
+}
+
+/* Send the request pouch as one SAR transaction on the downlink
+ * characteristic: wait for the receiver's open ACK, send the single
+ * FIRST|LAST fragment, wait for its ACK, then send FIN (code 0).
+ */
+static int send_request(const uint8_t *frame, size_t frame_len)
+{
+	uint8_t ack[SAR_ACK_LEN];
+	uint8_t pkt[2 + sizeof(frame_single_entry)];
+	int err;
+
+	if (k_msgq_get(&dl_ack_q, ack, K_SECONDS(30)) != 0) {
+		printk("PROV_BSIM: FAIL timeout_open_ack\n");
+		return -ETIMEDOUT;
+	}
+	if (ack[0] != SAR_CODE_ACK || ack[1] != SAR_SEQ_NONE) {
+		printk("PROV_BSIM: FAIL open_ack (%02x %02x %02x)\n", ack[0], ack[1], ack[2]);
+		return -EIO;
+	}
+
+	pkt[0] = SAR_FLAG_FIRST | SAR_FLAG_LAST;
+	pkt[1] = 0; /* seq */
+	memcpy(&pkt[2], frame, frame_len);
+
+	err = gatt_write_sync(downlink_value_handle, pkt, 2 + frame_len);
+	if (err != 0) {
+		printk("PROV_BSIM: FAIL request_write (%d)\n", err);
+		return err;
+	}
+
+	if (k_msgq_get(&dl_ack_q, ack, K_SECONDS(30)) != 0) {
+		printk("PROV_BSIM: FAIL timeout_request_ack\n");
+		return -ETIMEDOUT;
+	}
+	if (ack[0] != SAR_CODE_ACK || ack[1] != 0) {
+		printk("PROV_BSIM: FAIL request_ack (%02x %02x %02x)\n", ack[0], ack[1], ack[2]);
+		return -EIO;
+	}
+
+	const uint8_t fin[] = {SAR_FLAG_FIN, SAR_CODE_ACK};
+
+	err = gatt_write_sync(downlink_value_handle, fin, sizeof(fin));
+	if (err != 0) {
+		printk("PROV_BSIM: FAIL fin_write (%d)\n", err);
+		return err;
+	}
+
+	return 0;
+}
+
+/* Receive the response pouch as one SAR transaction on the uplink
+ * characteristic: send the initial ACK, collect and ack in-order
+ * fragments until LAST, then expect FIN.
+ */
+static int recv_response(uint8_t *buf, size_t buf_size, size_t *out_len)
+{
+	uint8_t ack[SAR_ACK_LEN] = {SAR_CODE_ACK, SAR_SEQ_NONE, SAR_WINDOW};
+	struct ul_pkt pkt;
+	size_t len = 0;
+	uint8_t expected = 0;
+	bool ended = false;
+	int err;
+
+	err = gatt_write_sync(uplink_value_handle, ack, sizeof(ack));
+	if (err != 0) {
+		printk("PROV_BSIM: FAIL initial_ack_write (%d)\n", err);
+		return err;
+	}
+
+	while (true) {
+		if (k_msgq_get(&ul_pkt_q, &pkt, K_SECONDS(30)) != 0) {
+			printk("PROV_BSIM: FAIL timeout_response\n");
+			return -ETIMEDOUT;
+		}
+		if (pkt.len < 2) {
+			printk("PROV_BSIM: FAIL short_packet (%u)\n", pkt.len);
+			return -EIO;
+		}
+
+		uint8_t flags = pkt.data[0];
+
+		if (flags & SAR_FLAG_FIN) {
+			if (!ended) {
+				printk("PROV_BSIM: FAIL fin_before_last\n");
+				return -EIO;
+			}
+			/* Any FIN after LAST ends the transfer (code is
+			 * informational; the device's first FIN is code 0).
+			 */
+			*out_len = len;
+			return 0;
+		}
+
+		uint8_t seq = pkt.data[1];
+
+		if (ended || seq != expected) {
+			printk("PROV_BSIM: FAIL unexpected_seq (%u, expected %u)\n", seq,
+			       expected);
+			return -EIO;
+		}
+		if (len + pkt.len - 2 > buf_size) {
+			printk("PROV_BSIM: FAIL response_overflow\n");
+			return -ENOMEM;
+		}
+
+		memcpy(&buf[len], &pkt.data[2], pkt.len - 2);
+		len += pkt.len - 2;
+		expected = (seq + 1) & 0xFF;
+		if (flags & SAR_FLAG_LAST) {
+			ended = true;
+		}
+
+		ack[1] = seq;
+		err = gatt_write_sync(uplink_value_handle, ack, sizeof(ack));
+		if (err != 0) {
+			printk("PROV_BSIM: FAIL frag_ack_write (%d)\n", err);
+			return err;
+		}
+	}
+}
+
+/* Check the response pouch contains a .prov/ver entry whose payload is a
+ * ver-rsp with op 0 and status 0 (ok). The CBOR array head may grow
+ * trailing elements in minor revisions (0x83..0x85 accepted).
+ */
+static bool response_has_ver_ok(const uint8_t *buf, size_t len)
+{
+	static const uint8_t path[] = ".prov/ver";
+	const size_t path_len = sizeof(path) - 1;
+
+	for (size_t i = 0; i + path_len + 3 <= len; i++) {
+		if (memcmp(&buf[i], path, path_len) != 0) {
+			continue;
+		}
+
+		const uint8_t *rsp = &buf[i + path_len];
+
+		if (rsp[0] >= 0x83 && rsp[0] <= 0x85 && rsp[1] == 0x00 && rsp[2] == 0x00) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
 int main(void)
 {
+	static uint8_t response[512];
+	size_t response_len = 0;
 	int err;
 
 	err = bt_enable(NULL);
@@ -300,25 +547,58 @@ int main(void)
 
 	printk("PROV_BSIM: service discovered\n");
 
-	sub_params.notify = uplink_notify_cb;
-	sub_params.subscribe = subscribe_cb;
-	sub_params.value = BT_GATT_CCC_NOTIFY;
-	sub_params.value_handle = uplink_value_handle;
-	sub_params.ccc_handle = 0; /* auto-discover via disc_params */
-	sub_params.disc_params = &ccc_disc_params;
-	sub_params.end_handle = svc_end_handle;
-
-	err = bt_gatt_subscribe(default_conn, &sub_params);
+	/* Request cycle: one SAR transaction per downlink subscription. The
+	 * CCC write opens the device's SAR receiver, which acks immediately.
+	 */
+	err = subscribe(&dl_sub_params, &dl_ccc_disc_params, downlink_value_handle,
+			downlink_notify_cb, "downlink");
 	if (err != 0) {
-		printk("PROV_BSIM: FAIL subscribe_req (%d)\n", err);
 		return err;
 	}
 
-	if (wait_stage(&sem_subscribed, "subscribe") != 0) {
-		return -ETIMEDOUT;
+	err = send_request(frame_single_entry, sizeof(frame_single_entry));
+	if (err != 0) {
+		return err;
+	}
+
+	printk("PROV_BSIM: request sent\n");
+
+	err = bt_gatt_unsubscribe(default_conn, &dl_sub_params);
+	if (err != 0) {
+		printk("PROV_BSIM: FAIL downlink_unsubscribe (%d)\n", err);
+		return err;
+	}
+
+	/* Response cycle: the uplink CCC write opens the device's uplink
+	 * pouch; its provisioning uplink handler drains the response queue
+	 * into it (waiting for the first response), and the device's SAR
+	 * sender pushes fragments once we ack.
+	 */
+	err = subscribe(&ul_sub_params, &ul_ccc_disc_params, uplink_value_handle,
+			uplink_notify_cb, "uplink");
+	if (err != 0) {
+		return err;
 	}
 
 	printk("PROV_BSIM: subscribed\n");
+
+	err = recv_response(response, sizeof(response), &response_len);
+	if (err != 0) {
+		return err;
+	}
+
+	printk("PROV_BSIM: response (%u bytes):", (unsigned int)response_len);
+	for (size_t i = 0; i < response_len; i++) {
+		printk(" %02x", response[i]);
+	}
+	printk("\n");
+
+	if (!response_has_ver_ok(response, response_len)) {
+		printk("PROV_BSIM: FAIL ver_response_check\n");
+		return -EINVAL;
+	}
+
+	printk("PROV_BSIM: ver response OK\n");
 	printk("PROV_BSIM: PASS\n");
 
 	k_sleep(K_FOREVER);

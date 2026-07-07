@@ -26,3 +26,8 @@ def test_ble_provisioning_smoke(dut):
     # GATT service + characteristic discovery and uplink CCC subscribe.
     assert re.search(r"PROV_BSIM: service discovered", output)
     assert re.search(r"PROV_BSIM: subscribed", output)
+    # .prov/ver RPC round trip over the pouch SAR transport: request
+    # pouch acked by the device, response pouch carried a ver-rsp with
+    # status ok.
+    assert re.search(r"PROV_BSIM: request sent", output)
+    assert re.search(r"PROV_BSIM: ver response OK", output)
