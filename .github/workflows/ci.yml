@@ -14,6 +14,7 @@ jobs:
     container: ghcr.io/zephyrproject-rtos/ci:v0.28.4
     env:
       ZEPHYR_TOOLCHAIN_VARIANT: zephyr
+      ZEPHYR_SDK_INSTALL_DIR: /opt/toolchains
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -51,6 +52,7 @@ jobs:
     container: ghcr.io/zephyrproject-rtos/ci:v0.28.4
     env:
       ZEPHYR_TOOLCHAIN_VARIANT: zephyr
+      ZEPHYR_SDK_INSTALL_DIR: /opt/toolchains
     steps:
       - name: Checkout
         uses: actions/checkout@v4
