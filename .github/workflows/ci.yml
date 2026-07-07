@@ -29,6 +29,9 @@ jobs:
           west update --narrow -o=--depth=1
           west zephyr-export
 
+      - name: Install twister Python deps
+        run: pip3 install -r zephyr/scripts/requirements-build-test.txt
+
       - name: Twister — ztest suites
         run: |
           west twister -T pouch-network-provisioning/tests \
@@ -60,6 +63,9 @@ jobs:
           west update --narrow -o=--depth=1
           west zephyr-export
           west blobs fetch hal_espressif
+
+      - name: Install twister Python deps
+        run: pip3 install -r zephyr/scripts/requirements-build-test.txt
 
       - name: Build samples (esp32s3)
         run: |
