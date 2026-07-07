@@ -12,12 +12,73 @@ handler: (path, payload) -> response payload | None.
 from __future__ import annotations
 
 import asyncio
+import struct
 from collections.abc import Callable
 
-from ..pouchlink import pouch, sar
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM, ChaCha20Poly1305
+
+from ..pouchlink import pouch, saead
+from ..pouchlink import sar
 from .base import Channel, Transport
 
 Handler = Callable[[str, bytes], bytes | None]
+
+
+class DeviceSaead:
+    """Device-side saead for the mock: decrypt downlink, encrypt uplink.
+
+    Mirrors the firmware: for a server-initiated downlink it derives
+    ECDH(device_priv, server_pub) with the header's session params; for
+    its own uplink it initiates a device session with a fresh id.
+    """
+
+    def __init__(self, device_priv: ec.EllipticCurvePrivateKey,
+                 server_pub: ec.EllipticCurvePublicKey,
+                 algorithm: int = saead.ALG_CHACHA20_POLY1305, block_log: int = 9):
+        self._priv = device_priv
+        self._server_pub = server_pub
+        self._algorithm = algorithm
+        self._block_log = block_log
+
+    def _aead(self, key: bytes):
+        return (ChaCha20Poly1305(key) if self._algorithm == saead.ALG_CHACHA20_POLY1305
+                else AESGCM(key))
+
+    def decrypt_downlink(self, data: bytes) -> list[pouch.Entry]:
+        header, consumed = pouch.PouchHeader.decode(data)
+        info = header.session
+        key = saead.derive_session_key(self._priv, self._server_pub, info.session_id,
+                                       saead.ROLE_SERVER, info.algorithm, info.max_block_size_log)
+        aead = self._aead(key)
+        pos, idx, prev_tag, payloads = consumed, 0, b"", []
+        while pos < len(data):
+            (size,) = struct.unpack_from(">H", data, pos)
+            pos += 2
+            sealed = data[pos:pos + size]
+            pos += size
+            nonce = struct.pack(">HHB", header.pouch_id, idx, saead.ROLE_SERVER) + b"\x00" * 7
+            plain = aead.decrypt(nonce, sealed, prev_tag if idx > 0 else b"")
+            prev_tag = sealed[-16:]
+            payloads.append(plain[1:])
+            idx += 1
+        return pouch.parse_entry_blocks(payloads)
+
+    def encrypt_uplink(self, entries: list[pouch.Entry], session_id: bytes,
+                       pouch_id: int = 1) -> bytes:
+        key = saead.derive_session_key(self._priv, self._server_pub, session_id,
+                                       saead.ROLE_DEVICE, self._algorithm, self._block_log)
+        aead = self._aead(key)
+        cert_ref = b"\x00" * 6
+        info = pouch.SessionInfo(session_id, saead.ROLE_DEVICE, self._algorithm,
+                                 self._block_log, cert_ref)
+        header = pouch.PouchHeader(pouch.ENCRYPTION_SAEAD, session=info, pouch_id=pouch_id)
+        payload = b"".join(e.encode() for e in entries)
+        id_byte = pouch.BLOCK_ID_ENTRY | pouch.BLOCK_FIRST | pouch.BLOCK_LAST
+        block_plain = bytes([id_byte]) + payload
+        nonce = struct.pack(">HHB", pouch_id, 0, saead.ROLE_DEVICE) + b"\x00" * 7
+        sealed = aead.encrypt(nonce, block_plain, b"")
+        return header.encode() + struct.pack(">H", len(sealed)) + sealed
 
 
 class _MockChannel(Channel):
@@ -51,12 +112,15 @@ class MockDeviceTransport(Transport):
     """Device-side state machine behind two mock channels."""
 
     def __init__(self, handler: Handler, device_id: str = "mock-dev",
-                 window: int = 3, defer_responses: int = 0):
+                 window: int = 3, defer_responses: int = 0,
+                 device_saead: "DeviceSaead | None" = None):
         self.downlink = _MockChannel()
         self.uplink = _MockChannel()
         self._handler = handler
         self._device_id = device_id
         self._window = window
+        self._saead = device_saead
+        self._uplink_sid = bytes(range(16))
         # Number of uplink cycles to answer with an empty pouch first
         # (simulates "response not ready").
         self._defer = defer_responses
@@ -103,7 +167,10 @@ class MockDeviceTransport(Transport):
         self._dl_ack(seq)
 
     def _process_request(self, data: bytes) -> None:
-        _header, entries = pouch.parse_pouch(data)
+        if self._saead is not None:
+            entries = self._saead.decrypt_downlink(data)
+        else:
+            _header, entries = pouch.parse_pouch(data)
         for entry in entries:
             rsp = self._handler(entry.path, entry.data)
             if rsp is not None:
@@ -117,7 +184,14 @@ class MockDeviceTransport(Transport):
             entries: list[pouch.Entry] = []
         else:
             entries, self._responses = self._responses, []
-        if entries:
+        if self._saead is not None:
+            if entries:
+                data = self._saead.encrypt_uplink(entries, self._uplink_sid)
+            else:
+                info = pouch.SessionInfo(self._uplink_sid, saead.ROLE_DEVICE,
+                                         self._saead._algorithm, self._saead._block_log, bytes(6))
+                data = pouch.PouchHeader(pouch.ENCRYPTION_SAEAD, session=info, pouch_id=1).encode()
+        elif entries:
             data = pouch.build_entry_pouch(self._device_id, entries)
         else:
             data = pouch.Pouch(

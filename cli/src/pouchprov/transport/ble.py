@@ -16,6 +16,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from bleak import BleakClient, BleakScanner
+from bleak.exc import BleakError
 
 from .base import Channel, Transport
 
@@ -81,10 +82,20 @@ class _BleChannel(Channel):
 
     async def write(self, data: bytes) -> None:
         # Write WITH response: pouch's characteristics require an encrypted
-        # (LESC) link for writes. Write-without-response on an unencrypted
-        # link is dropped silently, while a failed write-with-response makes
-        # CoreBluetooth/BlueZ initiate pairing (Just Works) and retry.
-        await self._client_ref().write_gatt_char(self._uuid, data, response=True)
+        # (LESC) link for writes. The device sends an SMP Security Request on
+        # connect, so pairing runs concurrently and takes a few seconds; until
+        # it completes, writes fail with "Insufficient Encryption". Retry
+        # through that window (it only occurs before the link is encrypted, so
+        # retrying can never duplicate an accepted write).
+        deadline = asyncio.get_running_loop().time() + 12.0
+        while True:
+            try:
+                await self._client_ref().write_gatt_char(self._uuid, data, response=True)
+                return
+            except BleakError as exc:
+                if "Encryption" not in str(exc) or asyncio.get_running_loop().time() > deadline:
+                    raise
+                await asyncio.sleep(0.4)
 
     async def subscribe(self, cb) -> None:
         await self._client_ref().start_notify(self._uuid, lambda _h, d: cb(bytes(d)))
@@ -131,6 +142,18 @@ class BleTransport(Transport):
         self._client = BleakClient(target, timeout=self._timeout)
         await self._client.connect()
         logger.info("connected, MTU %d", self._client.mtu_size)
+        # The device sends an SMP Security Request on connect; let pairing
+        # settle before any session I/O so the first writes land on an already
+        # encrypted link (racing GATT traffic against pairing destabilises the
+        # connection on macOS). Prime encryption with a retrying dummy write to
+        # the downlink CCC path via a short settle.
+        await self._await_encryption()
+
+    async def _await_encryption(self, settle: float = 6.0) -> None:
+        """Give the device-initiated pairing time to complete."""
+        await asyncio.sleep(settle)
+        if not self._get_client().is_connected:
+            raise ConnectionError("link dropped during pairing")
 
     async def _scan_for(self, name: str | None):
         """Return the BLEDevice for `name`, or the strongest provisioning

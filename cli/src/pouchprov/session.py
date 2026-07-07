@@ -13,7 +13,10 @@ from __future__ import annotations
 import asyncio
 import logging
 
+import secrets
+
 from .pouchlink import pouch
+from .pouchlink.saead import SaeadSession, build_downlink_pouch, parse_uplink_pouch
 from .pouchlink.sar import SarReceiver, SarSender
 from .transport.base import Transport
 
@@ -30,12 +33,18 @@ class SessionError(Exception):
 class ProvSession:
     """Lockstep request/response engine. One request pouch at a time."""
 
-    def __init__(self, transport: Transport, device_id: str = "", maxlen: int = DEFAULT_MAXLEN):
+    def __init__(self, transport: Transport, device_id: str = "", maxlen: int = DEFAULT_MAXLEN,
+                 saead: SaeadSession | None = None):
         self._transport = transport
         self._maxlen = maxlen
         self._lock = asyncio.Lock()
+        self._saead = saead  # when set, downlink is encrypted / uplink decrypted
         self.device_id = device_id  # from the plaintext response header
         self.block_size = 512  # updated from .prov/ver
+
+    def enable_encryption(self, saead: SaeadSession) -> None:
+        """Switch the session to encrypted (saead) framing."""
+        self._saead = saead
 
     async def request_entries(
         self,
@@ -71,10 +80,13 @@ class ProvSession:
         raise SessionError(f"no response entry for {path}")
 
     async def _send_pouch(self, entries: list[pouch.Entry], timeout: float) -> None:
-        # The CLI is the "gateway" writing a downlink pouch. Encryption-none
-        # framing in M2; the saead session slots in here in M3.
-        data = pouch.build_entry_pouch(self.device_id or "?", entries,
-                                       block_size=self.block_size)
+        # The CLI is the pouch "server" writing a downlink pouch.
+        if self._saead is not None:
+            data = build_downlink_pouch(self._saead, secrets.token_bytes(16), entries,
+                                        block_size=self.block_size)
+        else:
+            data = pouch.build_entry_pouch(self.device_id or "?", entries,
+                                           block_size=self.block_size)
         ch = self._transport.downlink
         sender = SarSender(ch.write, self._maxlen)
         await ch.subscribe(sender.feed)
@@ -91,4 +103,10 @@ class ProvSession:
             data = await receiver.receive(timeout)
         finally:
             await ch.unsubscribe()
+        header, _ = pouch.PouchHeader.decode(data)
+        if self._saead is not None and header.encryption == pouch.ENCRYPTION_SAEAD:
+            # An empty uplink pouch (header only) still parses to no entries.
+            if len(data) > len(header.encode()):
+                return header, parse_uplink_pouch(self._saead, data)
+            return header, []
         return pouch.parse_pouch(data)
