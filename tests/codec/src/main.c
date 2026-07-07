@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Pins the zcbor-generated device codec to the shared golden vectors
- * (tests/vectors/*.json), the same bytes the Python CLI is tested
+ * in tests/vectors, the same bytes the Python CLI is tested
  * against. Decode tests consume CLI-encoded requests; encode tests must
  * produce byte-identical responses to what the CLI decodes.
  */
