@@ -380,7 +380,10 @@ static int send_request(const uint8_t *frame, size_t frame_len)
 
 /* Receive the response pouch as one SAR transaction on the uplink
  * characteristic: send the initial ACK, collect and ack in-order
- * fragments until LAST, then expect FIN.
+ * fragments until LAST, then expect FIN. The ACK is re-sent as a poll
+ * while waiting (mirroring the CLI's SarReceiver): the device's sender
+ * opens asynchronously after the CCC subscribe and drops ACKs that
+ * arrive before that, then waits for one before pushing fragments.
  */
 static int recv_response(uint8_t *buf, size_t buf_size, size_t *out_len)
 {
@@ -397,10 +400,21 @@ static int recv_response(uint8_t *buf, size_t buf_size, size_t *out_len)
 		return err;
 	}
 
+	int polls_left = 60;
+
 	while (true) {
-		if (k_msgq_get(&ul_pkt_q, &pkt, K_SECONDS(30)) != 0) {
-			printk("PROV_BSIM: FAIL timeout_response\n");
-			return -ETIMEDOUT;
+		if (k_msgq_get(&ul_pkt_q, &pkt, K_MSEC(500)) != 0) {
+			if (--polls_left <= 0) {
+				printk("PROV_BSIM: FAIL timeout_response\n");
+				return -ETIMEDOUT;
+			}
+
+			err = gatt_write_sync(uplink_value_handle, ack, sizeof(ack));
+			if (err != 0) {
+				printk("PROV_BSIM: FAIL poll_ack_write (%d)\n", err);
+				return err;
+			}
+			continue;
 		}
 		if (pkt.len < 2) {
 			printk("PROV_BSIM: FAIL short_packet (%u)\n", pkt.len);
