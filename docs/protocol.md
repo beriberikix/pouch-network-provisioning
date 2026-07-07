@@ -1,7 +1,10 @@
 # Pouch Network Provisioning Protocol — v1
 
-Status: draft (phase 1). This document is the normative contract for
+Status: v1, phase 1. This document is the normative contract for
 provisioning clients (the Python CLI today; Android/iOS SDKs later).
+Both reference implementations — the device library and the Python CLI —
+are pinned to it byte-for-byte via the golden vectors in `tests/vectors/`.
+Breaking changes may still land while the project is pre-1.0.
 
 ## Overview
 
@@ -144,21 +147,35 @@ The device gates every endpoint except `.prov/ver` and `.prov/auth`
 until the client proof verifies. Three consecutive failed proofs SHOULD
 terminate the session.
 
-## Threat model (summary; full analysis in phase M6)
+## Threat model
 
-- Channel confidentiality/integrity: pouch saead (AEAD, per-block
-  nonces, chained auth tags).
-- Client → device impersonation: blocked by PoP (client proof).
-- Device → client impersonation (credential harvesting): blocked by PoP
-  (device proof verified first).
-- **Residual risk**: an active relay MITM present during the
-  provisioning window can bridge two sessions; PoP challenge-response
-  is not bound into pouch's key derivation. Accepted for phase 1;
-  a proposal to mix a pre-shared secret into pouch's HKDF (closing
-  this gap) is tracked as an upstream pouch RFC.
-- The device accepts the client's self-signed server certificate when
-  built with `CONFIG_POUCH_VALIDATE_SERVER_CERT=n`. Closed fleets can
-  instead provision a CA and pin `CONFIG_POUCH_SERVER_CERT_CN`.
+Assets: the device's cloud credential (delivered on `.prov/cred`) and the
+Wi-Fi passphrase (`.prov/config`). Adversary: a nearby BLE peer, optionally
+an active relay in radio range during the provisioning window.
+
+| Threat | Mitigation |
+|---|---|
+| Eavesdropping / tampering on the channel | pouch saead: per-block AEAD (ChaCha20-Poly1305 / AES-256-GCM), 12-byte per-block nonces, prior-block auth tag chained as AAD (reordering/truncation break decryption) |
+| Client → device impersonation (a stranger provisions the device) | PoP client proof — the device rejects every gated endpoint until `HMAC(PoP, "cli" ‖ …)` verifies; 3 failed proofs end the session |
+| Device → client impersonation (a fake device harvests the pushed credential) | PoP device proof, which the client verifies **before** sending its own proof or any credential |
+| Replay of a captured session | random 16-byte session ids per pouch; the device also guards against same-power-cycle replay (`src/saead/downlink.c`) |
+| Failed Wi-Fi attempt leaving stale/guessable creds | a failed connect deletes the just-stored credentials, so the device never boots "provisioned" without a working network |
+
+**Residual risk (documented, accepted for phase 1).** An active relay MITM
+present during the provisioning window can bridge two sessions: the PoP
+challenge-response authenticates *possession of the secret* but is not
+bound into pouch's key derivation, so it does not by itself authenticate
+the *channel*. Closing this is tracked as
+[upstream proposal #1](upstream-pouch.md#1-proposal-mix-a-pre-shared-secret-into-the-saead-hkdf-closes-mitm-gap)
+(mix the PoP into the saead HKDF). Deployments that need MITM resistance
+today should provision in a controlled RF environment.
+
+**Trust in the client certificate.** The device accepts the client's
+self-signed server certificate when built with
+`CONFIG_POUCH_VALIDATE_SERVER_CERT=n` (the sample default, trust-on-first-
+use). Closed fleets can instead ship a CA and pin
+`CONFIG_POUCH_SERVER_CERT_CN` so only a known provisioning client is
+accepted.
 
 ## Versioning
 
