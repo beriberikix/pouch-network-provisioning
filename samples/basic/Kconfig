@@ -1,0 +1,5 @@
+source "Kconfig.zephyr"
+
+config SAMPLE_POP
+	string "Proof-of-possession secret (empty disables auth)"
+	default ""
