@@ -60,6 +60,7 @@ challenge inside the encrypted channel authorizes the session. See
 | `samples/golioth_bootstrap/` | Full zero-touch onboarding sample |
 | `cli/` | `pouch-prov` Python package (`pouchprov`) — reference client |
 | `android/` | Kotlin SDK (`pouchprov-core`/`-ble`) + Compose reference app |
+| `ios/` | Swift SDK (`PouchProvCore`/`-BLE`) + SwiftUI reference app |
 | `tests/` | Device `ztest` suites (run under twister/`native_sim`) |
 | `docs/` | Protocol spec, [client parity](docs/clients.md), upstream-pouch notes |
 
@@ -115,7 +116,7 @@ the full capability parity matrix.
 |---|---|---|
 | CLI (reference) | Python | [`cli/`](cli/) |
 | Android SDK + app | Kotlin | [`android/`](android/) |
-| iOS SDK + app | Swift | _planned_ |
+| iOS SDK + app | Swift | [`ios/`](ios/) |
 
 ### CLI
 
@@ -142,6 +143,19 @@ $ ./gradlew :app:installDebug        # reference app on a connected phone
 The Kotlin SDK mirrors the CLI verbs (`PouchProvManager.scan()`,
 `PouchProvDevice.provision(…)`). See [`android/README.md`](android/README.md).
 
+### iOS
+
+```console
+$ cd ios/PouchProv && swift test    # protocol conformance (no hardware)
+$ cd ../PouchProvApp && xcodegen generate   # then open PouchProvApp.xcodeproj
+```
+
+The Swift SDK exposes the same API surface (`PouchProvManager.scan()`,
+`PouchProvDevice.provision(…)`); the core package also builds and tests on
+Linux. Running the app on a physical iPhone requires Xcode 16+ and
+[XcodeGen](https://github.com/yonaskolb/XcodeGen). See
+[`ios/README.md`](ios/README.md).
+
 ## Development & testing
 
 Device tests run under Zephyr's twister on `native_sim` (Linux/CI); the
@@ -156,12 +170,15 @@ west twister -T tests -p native_sim
 ```
 
 CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs the twister
-ztests, a sample build matrix, the CLI checks, and a generated-code
-freshness check.
+ztests, a sample build matrix, the CLI checks, the Android and Swift
+golden-vector conformance suites (the Swift core on both Linux and macOS,
+plus a Simulator build of the iOS app), and a generated-code freshness
+check.
 
-**Note:** the live encrypted BLE round-trip is validated from a phone or
-Linux host — macOS CoreBluetooth cannot complete LE Secure-Connections
-pairing with the ESP32-S3 (details in the protocol doc / dev notes).
+**Note:** the live encrypted BLE round-trip is validated from a phone
+(Android or iPhone) or Linux host — macOS CoreBluetooth cannot complete
+LE Secure-Connections pairing with the ESP32-S3 (details in the protocol
+doc / dev notes).
 
 ## License
 
