@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright (c) 2026 Jonathan Beri; SPDX-License-Identifier: Apache-2.0 -->
+<resources>
+    <!-- Pure-Compose app: a plain platform theme, no Material XML dependency. -->
+    <style name="Theme.PouchProv" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>

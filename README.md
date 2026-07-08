@@ -58,9 +58,10 @@ challenge inside the encrypted channel authorizes the session. See
 | `samples/basic/` | Minimal provisioning target (transport bring-up) |
 | `samples/cred_only/` | BLE-only credential bootstrap (no Wi-Fi) |
 | `samples/golioth_bootstrap/` | Full zero-touch onboarding sample |
-| `cli/` | `pouch-prov` Python package (`pouchprov`) |
+| `cli/` | `pouch-prov` Python package (`pouchprov`) — reference client |
+| `android/` | Kotlin SDK (`pouchprov-core`/`-ble`) + Compose reference app |
 | `tests/` | Device `ztest` suites (run under twister/`native_sim`) |
-| `docs/` | Protocol spec, upstream-pouch notes |
+| `docs/` | Protocol spec, [client parity](docs/clients.md), upstream-pouch notes |
 
 ## Using the device library
 
@@ -104,7 +105,19 @@ $ pouchprov provision --pop abcd1234 --cert device.crt.pem --key device.key.pem
 
 See [`samples/cred_only/`](samples/cred_only/) for a minimal BLE-only target.
 
-## The CLI
+## Clients
+
+The same wire protocol is spoken by every client, each pinned to the shared
+golden vectors in `tests/vectors/`. See [docs/clients.md](docs/clients.md) for
+the full capability parity matrix.
+
+| Client | Language | Location |
+|---|---|---|
+| CLI (reference) | Python | [`cli/`](cli/) |
+| Android SDK + app | Kotlin | [`android/`](android/) |
+| iOS SDK + app | Swift | _planned_ |
+
+### CLI
 
 ```console
 $ cd cli && uv pip install -e ".[dev]"
@@ -116,8 +129,18 @@ $ pouchprov provision --pop abcd1234 --ssid MyNet --password hunter22 \
 
 Pass `--ssid` and/or `--cert/--key`: a Wi-Fi device takes both, a BLE-only
 device takes certificates alone (omit `--ssid`). Certificates/keys may be PEM
-or DER. The CLI is the reference client; the same protocol is the contract for
-future Android/iOS SDKs.
+or DER.
+
+### Android
+
+```console
+$ cd android
+$ ./gradlew :pouchprov-core:test     # protocol conformance (no hardware)
+$ ./gradlew :app:installDebug        # reference app on a connected phone
+```
+
+The Kotlin SDK mirrors the CLI verbs (`PouchProvManager.scan()`,
+`PouchProvDevice.provision(…)`). See [`android/README.md`](android/README.md).
 
 ## Development & testing
 

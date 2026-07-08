@@ -143,6 +143,35 @@ jobs:
           .venv/bin/ruff check cli/src cli/tests
           .venv/bin/pytest cli
 
+  android:
+    name: Android (core tests + assemble)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Core conformance tests (golden vectors, pure JVM)
+        working-directory: android
+        # Reads the shared tests/vectors/*.json — the same fixtures the CLI and
+        # the device codec are pinned to — and checks them byte-for-byte.
+        run: ./gradlew :pouchprov-core:test
+      - name: Lint + assemble the library and app
+        working-directory: android
+        run: ./gradlew :pouchprov-ble:lintDebug :pouchprov-ble:assembleDebug :app:assembleDebug
+      - name: Upload test + lint reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-reports
+          path: |
+            android/pouchprov-core/build/reports/tests/**
+            android/pouchprov-ble/build/reports/lint-results-debug.*
+          if-no-files-found: ignore
+
   codegen:
     name: Generated code in sync
     runs-on: ubuntu-latest
