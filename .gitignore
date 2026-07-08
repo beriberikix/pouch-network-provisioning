@@ -5,3 +5,6 @@ build*/
 twister-out*/
 .DS_Store
 *.egg-info/
+
+# HAR captures may contain auth tokens/cookies — never commit
+*.har

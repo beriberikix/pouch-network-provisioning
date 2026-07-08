@@ -19,6 +19,13 @@ manifest:
 
   projects:
     # Same Zephyr revision pouch pins (pouch west-zephyr.yml).
+    #
+    # NOTE (BLE bonded-reconnect MIC failure on ESP32-S3): v4.3.0's bundled
+    # ESP32-S3 BT controller terminates every bonded LE reconnect with a MIC
+    # failure (HCI 0x3d). This is upstream Zephyr issue #108785, fixed on main
+    # / v4.4 by #109304 (coordinated hal_espressif controller-lib + BT-driver
+    # Kconfig changes). The fix does not cleanly backport onto v4.3.0. Moving
+    # this pin to v4.4.1+ (in step with pouch) is the real fix.
     - name: zephyr
       remote: zephyrproject
       revision: v4.3.0
