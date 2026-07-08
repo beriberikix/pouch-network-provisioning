@@ -1,11 +1,13 @@
 # pouch-network-provisioning
 
-Wi-Fi provisioning for blank Zephyr devices over BLE, built on the
-[pouch](https://github.com/golioth/pouch) protocol — plus cloud credential
-bootstrap for zero-touch [Golioth](https://golioth.io) enrollment.
+Network provisioning for blank Zephyr devices over BLE, built on the
+[pouch](https://github.com/golioth/pouch) protocol: Wi-Fi credentials and/or
+cloud credential bootstrap for zero-touch [Golioth](https://golioth.io)
+enrollment. Wi-Fi devices are provisioned with certificates + Wi-Fi; BLE-only
+devices with certificates alone.
 
-A totally unprovisioned device (no Wi-Fi credentials, no cloud identity) is
-provisioned in one CLI invocation:
+A totally unprovisioned Wi-Fi device (no Wi-Fi credentials, no cloud identity)
+is provisioned in one CLI invocation:
 
 ```console
 $ pouchprov provision --pop abcd1234 --ssid MyNet --password hunter22 \
@@ -54,6 +56,7 @@ challenge inside the encrypted channel authorizes the session. See
 | `include/pouch_prov/`, `src/` | Device library: manager, dispatch, handlers, identity, cred store |
 | `sim/wifi/` | Fake Wi-Fi driver for `native_sim` tests |
 | `samples/basic/` | Minimal provisioning target (transport bring-up) |
+| `samples/cred_only/` | BLE-only credential bootstrap (no Wi-Fi) |
 | `samples/golioth_bootstrap/` | Full zero-touch onboarding sample |
 | `cli/` | `pouch-prov` Python package (`pouchprov`) |
 | `tests/` | Device `ztest` suites (run under twister/`native_sim`) |
@@ -85,6 +88,22 @@ Build the encrypted configuration with `CONFIG_POUCH_ENCRYPTION_SAEAD=y`,
 for a complete example, including the small `mbedtls_user_config.h` needed
 for on-device certificate creation.
 
+Wi-Fi (`POUCH_PROV_WIFI`) and cloud-credential bootstrap (`POUCH_PROV_CRED`)
+are independent features, so the library serves all three device classes:
+
+| Device | Provisions | Config |
+|---|---|---|
+| Wi-Fi (+ BLE) | certs + Wi-Fi | `POUCH_PROV_WIFI=y`, `POUCH_PROV_CRED=y` |
+| BLE-only | certs only | `POUCH_PROV_WIFI=n`, `POUCH_PROV_CRED=y` |
+
+A BLE-only device is provisioned with certificates alone — omit `--ssid`:
+
+```console
+$ pouchprov provision --pop abcd1234 --cert device.crt.pem --key device.key.pem
+```
+
+See [`samples/cred_only/`](samples/cred_only/) for a minimal BLE-only target.
+
 ## The CLI
 
 ```console
@@ -95,8 +114,10 @@ $ pouchprov provision --pop abcd1234 --ssid MyNet --password hunter22 \
       --cert device.crt.pem --key device.key.pem
 ```
 
-Certificates/keys may be PEM or DER. The CLI is the reference client; the
-same protocol is the contract for future Android/iOS SDKs.
+Pass `--ssid` and/or `--cert/--key`: a Wi-Fi device takes both, a BLE-only
+device takes certificates alone (omit `--ssid`). Certificates/keys may be PEM
+or DER. The CLI is the reference client; the same protocol is the contract for
+future Android/iOS SDKs.
 
 ## Development & testing
 

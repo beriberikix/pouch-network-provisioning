@@ -31,11 +31,13 @@ static const struct pouch_prov_endpoint endpoints[] = {
 #if defined(CONFIG_POUCH_PROV_AUTH)
 	{ .path = POUCH_PROV_PATH_AUTH, .handler = pouch_prov_handle_auth, .require_auth = false },
 #endif
+	/* Available in every build: the `end` op stops provisioning regardless of
+	 * device class (reset/reprovision are gated inside the handler). */
+	{ .path = POUCH_PROV_PATH_CTRL, .handler = pouch_prov_handle_ctrl, .require_auth = true },
 #if defined(CONFIG_POUCH_PROV_WIFI)
 	{ .path = POUCH_PROV_PATH_CONFIG, .handler = pouch_prov_handle_config,
 	  .require_auth = true },
 	{ .path = POUCH_PROV_PATH_SCAN, .handler = pouch_prov_handle_scan, .require_auth = true },
-	{ .path = POUCH_PROV_PATH_CTRL, .handler = pouch_prov_handle_ctrl, .require_auth = true },
 #endif
 #if defined(CONFIG_POUCH_PROV_CRED)
 	{ .path = POUCH_PROV_PATH_CRED, .handler = pouch_prov_handle_cred, .require_auth = true },

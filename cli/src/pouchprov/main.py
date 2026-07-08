@@ -86,7 +86,8 @@ def wifi_scan(name: str | None, pop: str | None) -> None:
 @cli.command()
 @click.option("--name", "-n", default=None, help="Device name/address (default: auto-select).")
 @click.option("--pop", default=None, help="Proof-of-possession secret.")
-@click.option("--ssid", required=True, help="Wi-Fi SSID to provision.")
+@click.option("--ssid", default=None,
+              help="Wi-Fi SSID to provision (omit for a BLE-only, cred-only device).")
 @click.option("--password", default=None, help="Wi-Fi passphrase (omit for open networks).")
 @click.option("--cert", type=click.Path(exists=True), default=None,
               help="Device certificate (PEM or DER) to bootstrap.")
@@ -94,15 +95,21 @@ def wifi_scan(name: str | None, pop: str | None) -> None:
               help="Device private key (PEM or DER) to bootstrap.")
 @click.option("--ca", type=click.Path(exists=True), default=None,
               help="CA certificate (PEM or DER) to bootstrap.")
-def provision(name: str | None, pop: str | None, ssid: str, password: str | None,
+def provision(name: str | None, pop: str | None, ssid: str | None, password: str | None,
               cert: str | None, key: str | None, ca: str | None) -> None:
-    """Provision Wi-Fi credentials (and optionally cloud certificates)."""
+    """Provision cloud certificates and/or Wi-Fi credentials.
+
+    Provide --ssid for a Wi-Fi device and/or --cert/--key for cloud credential
+    bootstrap. A BLE-only device is provisioned with certificates alone.
+    """
     from pathlib import Path
 
     from .pouchlink import cert as certmod
 
     if bool(cert) ^ bool(key):
         raise click.UsageError("--cert and --key must be provided together")
+    if not ssid and not cert:
+        raise click.UsageError("provide --ssid and/or --cert/--key")
 
     async def run() -> None:
         async with ble.BleTransport(name) as transport:
@@ -119,16 +126,21 @@ def provision(name: str | None, pop: str | None, ssid: str, password: str | None
                 )
                 click.echo("cloud credentials stored")
 
-            status = await flows.configure_wifi(
-                session, ssid.encode(), password.encode() if password else None
-            )
-            if status.state == codec.StaState.CONNECTED:
-                ip = ".".join(str(b) for b in status.ip4) if status.ip4 else "?"
-                click.echo(f"connected: {status.ssid.decode(errors='replace')} ({ip})")
-                await flows.end_session(session)
-            else:
-                reason = status.fail_reason.name if status.fail_reason is not None else "unknown"
-                raise SystemExit(f"provisioning failed: {reason}")
+            if ssid:
+                if "wifi" not in info.caps:
+                    raise SystemExit("device does not support Wi-Fi provisioning")
+                status = await flows.configure_wifi(
+                    session, ssid.encode(), password.encode() if password else None
+                )
+                if status.state == codec.StaState.CONNECTED:
+                    ip = ".".join(str(b) for b in status.ip4) if status.ip4 else "?"
+                    click.echo(f"connected: {status.ssid.decode(errors='replace')} ({ip})")
+                else:
+                    reason = (status.fail_reason.name
+                              if status.fail_reason is not None else "unknown")
+                    raise SystemExit(f"provisioning failed: {reason}")
+
+            await flows.end_session(session)
 
     asyncio.run(run())
 

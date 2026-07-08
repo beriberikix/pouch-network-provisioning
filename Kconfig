@@ -88,7 +88,12 @@ config POUCH_PROV_AUTOSTOP_TIMEOUT_S
 	int "Auto-stop timeout after provisioning completes (seconds)"
 	default 0
 	help
-	  0 disables auto-stop; the application stops the manager explicitly.
+	  Automatically stop the manager this many seconds after the terminal
+	  provisioning step (a Wi-Fi device once its station connects, or a
+	  BLE-only device once cloud credentials are stored), so a client that
+	  never sends an explicit .prov/ctrl end still lets the device proceed
+	  to normal operation. 0 disables auto-stop; the application (or a
+	  .prov/ctrl end from the client) stops the manager instead.
 
 config POUCH_PROV_DEVICE_NAME_PREFIX
 	string "BLE device name prefix"

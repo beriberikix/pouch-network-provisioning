@@ -14,6 +14,18 @@ protocol end to end. The provisioning client (CLI/phone) acts in pouch's
 **server role** and terminates the encrypted session locally; no cloud
 connectivity is required on the device side at any point.
 
+**Device classes.** Wi-Fi provisioning and cloud-credential bootstrap are
+independent device features, each advertised as a capability in `.prov/ver`:
+
+- **Wi-Fi (± BLE)** devices provision certificates *and* Wi-Fi credentials and
+  advertise the `wifi`/`scan` caps.
+- **BLE-only** devices provision certificates only and advertise no `wifi`
+  cap; the client omits the Wi-Fi steps.
+
+A client MUST branch on the advertised caps (e.g. skip `.prov/scan` and
+`.prov/config` when `wifi` is absent). `.prov/ctrl` is available on every
+device class.
+
 A full provisioning session:
 
 1. **Discovery** — device advertises the pouch GATT service with the
@@ -123,6 +135,11 @@ Client flow: query `.prov/ver` first; verify `proto == 1`; run
 `.prov/ctrl` end. Wi-Fi apply is asynchronous — poll `.prov/config` `[0]`
 until `sta-state` is connected (`0`) or failed (`3`, with a fail
 reason: `0` auth error, `1` network not found).
+
+`.prov/ctrl` ops: `end` (2) stops provisioning on every device class; `reset`
+(0) and `reprovision` (1) act on the Wi-Fi state machine and are effective only
+when the device has the Wi-Fi feature. `reprovision` additionally deletes any
+stored cloud credentials so a device can be re-provisioned from scratch.
 
 `.prov/cred` `kind`: `0` device certificate (DER), `1` private key
 (DER), `2` CA certificate (DER). Chunks arrive in order per kind
