@@ -52,7 +52,7 @@ int main(void)
 			LOG_ERR("start failed (%d)", err);
 			return err;
 		}
-		/* Wait until the client finishes (ctrl end). */
+		/* Wait until the client finishes (ctrl end or autostop). */
 		(void)pouch_prov_mgr_wait(K_FOREVER);
 		LOG_INF("Provisioning complete");
 	}

@@ -36,11 +36,55 @@ const struct pouch_prov_config *pouch_prov_config_get(void)
 	return &config;
 }
 
+#if CONFIG_POUCH_PROV_AUTOSTOP_TIMEOUT_S > 0
+/* After the terminal provisioning step, stop the manager automatically once
+ * the grace period elapses, so a client that never sends an explicit
+ * .prov/ctrl end still lets the device proceed to normal operation. */
+static void autostop_handler(struct k_work *work)
+{
+	ARG_UNUSED(work);
+	LOG_INF("Auto-stop timeout elapsed; stopping provisioning");
+	(void)pouch_prov_mgr_stop();
+}
+
+static K_WORK_DELAYABLE_DEFINE(autostop_work, autostop_handler);
+
+static void autostop_arm(void)
+{
+	if (running) {
+		k_work_reschedule(&autostop_work,
+				  K_SECONDS(CONFIG_POUCH_PROV_AUTOSTOP_TIMEOUT_S));
+	}
+}
+
+static void autostop_cancel(void)
+{
+	(void)k_work_cancel_delayable(&autostop_work);
+}
+#else
+static inline void autostop_cancel(void) {}
+#endif /* CONFIG_POUCH_PROV_AUTOSTOP_TIMEOUT_S > 0 */
+
 void pouch_prov_emit(enum pouch_prov_event event, const void *data)
 {
 	if (config.event_cb != NULL) {
 		config.event_cb(event, data, config.user_data);
 	}
+
+#if CONFIG_POUCH_PROV_AUTOSTOP_TIMEOUT_S > 0
+	/* Arm auto-stop on the last provisioning step for this device class: a
+	 * Wi-Fi device once the station connects, a BLE-only (cred-only) device
+	 * once cloud credentials are stored. */
+#if defined(CONFIG_POUCH_PROV_WIFI)
+	if (event == POUCH_PROV_EVENT_WIFI_CONNECTED) {
+		autostop_arm();
+	}
+#elif defined(CONFIG_POUCH_PROV_CRED)
+	if (event == POUCH_PROV_EVENT_CLOUD_CRED_STORED) {
+		autostop_arm();
+	}
+#endif
+#endif /* CONFIG_POUCH_PROV_AUTOSTOP_TIMEOUT_S > 0 */
 }
 
 /* Reset per-session state whenever a pouch session cycle starts. Pouch
@@ -145,6 +189,7 @@ int pouch_prov_mgr_start(void)
 
 	pouch_prov_dispatch_reset();
 	pouch_prov_rpc_reset();
+	autostop_cancel();
 	k_event_clear(&mgr_events, MGR_EVENT_ENDED);
 
 	err = pouch_prov_adv_start();
@@ -165,6 +210,7 @@ int pouch_prov_mgr_stop(void)
 	}
 
 	running = false;
+	autostop_cancel();
 	(void)pouch_prov_adv_stop();
 	pouch_prov_dispatch_reset();
 	pouch_prov_rpc_reset();
