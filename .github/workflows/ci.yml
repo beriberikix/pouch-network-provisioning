@@ -199,12 +199,28 @@ jobs:
         run: |
           set -o pipefail
           swift test 2>&1 | tee swift-test.log
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate the app project
+        working-directory: ios/PouchProvApp
+        run: xcodegen generate
+      - name: Build the app (Simulator, no signing)
+        working-directory: ios/PouchProvApp
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project PouchProvApp.xcodeproj -scheme PouchProvApp \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            2>&1 | tee xcodebuild.log
       - name: Upload logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ios-logs
-          path: ios/PouchProv/swift-test.log
+          path: |
+            ios/PouchProv/swift-test.log
+            ios/PouchProvApp/xcodebuild.log
           if-no-files-found: ignore
 
   codegen:
