@@ -85,6 +85,22 @@ Build the encrypted configuration with `CONFIG_POUCH_ENCRYPTION_SAEAD=y`,
 for a complete example, including the small `mbedtls_user_config.h` needed
 for on-device certificate creation.
 
+Wi-Fi (`POUCH_PROV_WIFI`) and cloud-credential bootstrap (`POUCH_PROV_CRED`)
+are independent features, so the library serves all three device classes:
+
+| Device | Provisions | Config |
+|---|---|---|
+| Wi-Fi (+ BLE) | certs + Wi-Fi | `POUCH_PROV_WIFI=y`, `POUCH_PROV_CRED=y` |
+| BLE-only | certs only | `POUCH_PROV_WIFI=n`, `POUCH_PROV_CRED=y` |
+
+A BLE-only device is provisioned with certificates alone — omit `--ssid`:
+
+```console
+$ pouchprov provision --pop abcd1234 --cert device.crt.pem --key device.key.pem
+```
+
+See [`samples/cred_only/`](samples/cred_only/) for a minimal BLE-only target.
+
 ## The CLI
 
 ```console

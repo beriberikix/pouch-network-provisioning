@@ -17,6 +17,7 @@
 #include <pouch/events.h>
 #include <pouch/pouch.h>
 
+#include <pouch_prov/credentials.h>
 #include <pouch_prov/manager.h>
 
 #include "pouch_prov_internal.h"
@@ -178,6 +179,10 @@ bool pouch_prov_mgr_is_provisioned(void)
 {
 #if defined(CONFIG_POUCH_PROV_WIFI)
 	return pouch_prov_wifi_is_provisioned();
+#elif defined(CONFIG_POUCH_PROV_CRED)
+	/* A cred-only (BLE-only) device is provisioned once it holds a cloud
+	 * device certificate to operate with. */
+	return pouch_prov_cred_present(POUCH_PROV_CRED_DEVICE_CERT);
 #else
 	return false;
 #endif
@@ -199,6 +204,9 @@ int pouch_prov_mgr_reset(void)
 {
 #if defined(CONFIG_POUCH_PROV_WIFI)
 	pouch_prov_wifi_reprovision();
+#endif
+#if defined(CONFIG_POUCH_PROV_CRED)
+	(void)pouch_prov_cred_delete_all();
 #endif
 	pouch_prov_dispatch_reset();
 	pouch_prov_rpc_reset();

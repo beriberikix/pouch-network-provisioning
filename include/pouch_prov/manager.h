@@ -53,7 +53,11 @@ int pouch_prov_mgr_start(void);
 /** Stop the provisioning service. */
 int pouch_prov_mgr_stop(void);
 
-/** True when Wi-Fi credentials are stored. */
+/**
+ * True when the device holds the credentials it needs to operate: Wi-Fi
+ * credentials when Wi-Fi provisioning is enabled, otherwise a stored cloud
+ * device certificate (cred-only / BLE-only builds).
+ */
 bool pouch_prov_mgr_is_provisioned(void);
 
 /**
@@ -62,5 +66,8 @@ bool pouch_prov_mgr_is_provisioned(void);
  */
 int pouch_prov_mgr_wait(k_timeout_t timeout);
 
-/** Wipe Wi-Fi (and cloud) credentials and reset the state machine. */
+/**
+ * Wipe stored credentials (Wi-Fi when enabled, and cloud credentials when the
+ * cred bootstrap endpoint is enabled) and reset the state machine.
+ */
 int pouch_prov_mgr_reset(void);

@@ -89,12 +89,17 @@ int pouch_prov_handle_auth(const uint8_t *req, size_t req_len, uint8_t *rsp, siz
 /* Reset per-connection auth state (called on disconnect). */
 void pouch_prov_auth_reset(void);
 
+/* .prov/ctrl is available in every provisioning build (the `end` op is
+ * transport-generic); only its reset/reprovision ops depend on the Wi-Fi
+ * feature. */
+int pouch_prov_handle_ctrl(const uint8_t *req, size_t req_len, uint8_t *rsp, size_t rsp_size,
+			   size_t *rsp_len);
+void pouch_prov_ctrl_end_requested(void); /* manager: client is done */
+
 #if defined(CONFIG_POUCH_PROV_WIFI)
 int pouch_prov_handle_config(const uint8_t *req, size_t req_len, uint8_t *rsp, size_t rsp_size,
 			     size_t *rsp_len);
 int pouch_prov_handle_scan(const uint8_t *req, size_t req_len, uint8_t *rsp, size_t rsp_size,
-			   size_t *rsp_len);
-int pouch_prov_handle_ctrl(const uint8_t *req, size_t req_len, uint8_t *rsp, size_t rsp_size,
 			   size_t *rsp_len);
 
 int pouch_prov_wifi_config_init(uint32_t conn_attempts);
@@ -105,7 +110,6 @@ bool pouch_prov_wifi_is_provisioned(void);
 /* ctrl helpers */
 void pouch_prov_wifi_reset_state(void);  /* reset SM without wiping creds */
 void pouch_prov_wifi_reprovision(void);  /* wipe stored Wi-Fi credentials + reset */
-void pouch_prov_ctrl_end_requested(void); /* manager: client is done */
 #endif
 
 #if defined(CONFIG_POUCH_PROV_CRED)

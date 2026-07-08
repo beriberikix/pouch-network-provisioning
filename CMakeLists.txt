@@ -15,6 +15,7 @@ zephyr_library_sources(
   src/dispatch.c
   src/rpc.c
   src/handlers/version.c
+  src/handlers/ctrl.c
 )
 zephyr_library_include_directories(src src/codec/include)
 
@@ -24,7 +25,6 @@ zephyr_library_sources_ifdef(CONFIG_POUCH_PROV_AUTH src/handlers/auth.c)
 zephyr_library_sources_ifdef(CONFIG_POUCH_PROV_WIFI
   src/handlers/wifi_config.c
   src/handlers/wifi_scan.c
-  src/handlers/ctrl.c
 )
 
 zephyr_library_sources_ifdef(CONFIG_POUCH_PROV_CRED

@@ -1,0 +1,14 @@
+sample:
+  name: BLE-only credential bootstrap
+  description: >
+    Blank BLE-only device (no Wi-Fi) provisions a cloud device certificate
+    over pouch, then reports itself provisioned. On a subsequent boot the
+    stored certificate is reused and provisioning is skipped.
+tests:
+  sample.pouch_prov.cred_only:
+    build_only: true
+    platform_allow:
+      - esp32s3_devkitc/esp32s3/procpu
+      - nrf7002dk/nrf5340/cpuapp
+    tags:
+      - pouch_prov

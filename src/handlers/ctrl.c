@@ -14,6 +14,8 @@
 #include <prov_decode.h>
 #include <prov_encode.h>
 
+#include <pouch_prov/credentials.h>
+
 #include "pouch_prov_internal.h"
 
 LOG_MODULE_REGISTER(pouch_prov_ctrl, CONFIG_POUCH_PROV_LOG_LEVEL);
@@ -32,11 +34,22 @@ int pouch_prov_handle_ctrl(const uint8_t *req, size_t req_len, uint8_t *rsp, siz
 	switch (in.ctrl_req_choice) {
 	case ctrl_req_ctrl_reset_m_c:
 		op = OP_CTRL_RESET;
+#if defined(CONFIG_POUCH_PROV_WIFI)
+		/* Reset the Wi-Fi state machine without wiping stored creds.
+		 * A no-op on cred-only builds (nothing staged to reset). */
 		pouch_prov_wifi_reset_state();
+#endif
 		break;
 	case ctrl_req_ctrl_reprovision_m_c:
 		op = OP_CTRL_REPROV;
+		/* Wipe every credential the device might have been provisioned
+		 * with so it can be re-provisioned from scratch. */
+#if defined(CONFIG_POUCH_PROV_WIFI)
 		pouch_prov_wifi_reprovision();
+#endif
+#if defined(CONFIG_POUCH_PROV_CRED)
+		(void)pouch_prov_cred_delete_all();
+#endif
 		break;
 	case ctrl_req_ctrl_end_m_c:
 		op = OP_CTRL_END;
