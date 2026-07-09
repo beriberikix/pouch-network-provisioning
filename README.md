@@ -109,7 +109,9 @@ See [`samples/cred_only/`](samples/cred_only/) for a minimal BLE-only target.
 ## Clients
 
 The same wire protocol is spoken by every client, each pinned to the shared
-golden vectors in `tests/vectors/`. See [docs/clients.md](docs/clients.md) for
+golden vectors in `tests/vectors/`. All three speak both pouch framings —
+plaintext and the saead encrypted session (TOFU cert exchange + per-block
+AEAD) — autodetected per device. See [docs/clients.md](docs/clients.md) for
 the full capability parity matrix.
 
 | Client | Language | Location |

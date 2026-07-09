@@ -31,8 +31,14 @@ object BleUuids {
     /** client -> device requests (write + notify). */
     val DOWNLINK: UUID = UUID.fromString("89a316ae-89b7-4ef6-b1d3-5c9a6e27d274")
 
-    /** read-only info characteristic ({flags, server_cert_snr}). */
+    /** info SAR endpoint ({flags, server_cert_snr}; device-side sender). */
     val INFO: UUID = UUID.fromString("89a316ae-89b7-4ef6-b1d3-5c9a6e27d275")
+
+    /** server-cert SAR endpoint (client pushes its cert; saead builds only). */
+    val SERVER_CERT: UUID = UUID.fromString("89a316ae-89b7-4ef6-b1d3-5c9a6e27d276")
+
+    /** device-cert SAR endpoint (device sends its identity cert; saead builds only). */
+    val DEVICE_CERT: UUID = UUID.fromString("89a316ae-89b7-4ef6-b1d3-5c9a6e27d277")
 
     /** Client Characteristic Configuration descriptor (enables notifications). */
     val CCC: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")

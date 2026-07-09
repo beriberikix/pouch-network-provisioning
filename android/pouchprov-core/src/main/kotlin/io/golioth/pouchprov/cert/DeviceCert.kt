@@ -115,11 +115,11 @@ object DeviceCert {
         return JcaX509CertificateConverter().getCertificate(builder.build(signer))
     }
 
-    private fun loadCertificate(pem: ByteArray): X509Certificate =
+    fun loadCertificate(pem: ByteArray): X509Certificate =
         CertificateFactory.getInstance("X.509")
             .generateCertificate(ByteArrayInputStream(pem)) as X509Certificate
 
-    private fun loadPrivateKey(pem: ByteArray): PrivateKey =
+    fun loadPrivateKey(pem: ByteArray): PrivateKey =
         KeyFactory.getInstance("EC").generatePrivate(PKCS8EncodedKeySpec(io.golioth.pouchprov.Pem.toDer(pem)))
 
     private fun pem(type: String, der: ByteArray): ByteArray {

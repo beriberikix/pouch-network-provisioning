@@ -108,6 +108,31 @@ async def bootstrap_credentials(session: ProvSession, cert_der: bytes, key_der: 
     logger.info("cloud credentials stored")
 
 
+async def cred_status(session: ProvSession) -> dict[codec.CredKind, int]:
+    """Query per-kind byte counts of credentials the device has received."""
+    return codec.decode_cred_status_rsp(
+        await session.request(codec.PATH_CRED, codec.encode_cred_get_status())
+    )
+
+
+async def reset(session: ProvSession) -> None:
+    """Reset the device's Wi-Fi state machine without wiping credentials."""
+    codec.decode_ctrl_rsp(
+        await session.request(codec.PATH_CTRL, codec.encode_ctrl(codec.CtrlOp.RESET)),
+        codec.CtrlOp.RESET,
+    )
+    logger.info("device Wi-Fi state reset")
+
+
+async def reprovision(session: ProvSession) -> None:
+    """Wipe stored Wi-Fi and cloud credentials so the device can be re-provisioned."""
+    codec.decode_ctrl_rsp(
+        await session.request(codec.PATH_CTRL, codec.encode_ctrl(codec.CtrlOp.REPROVISION)),
+        codec.CtrlOp.REPROVISION,
+    )
+    logger.info("device credentials wiped")
+
+
 async def end_session(session: ProvSession) -> None:
     codec.decode_ctrl_rsp(
         await session.request(codec.PATH_CTRL, codec.encode_ctrl(codec.CtrlOp.END)),

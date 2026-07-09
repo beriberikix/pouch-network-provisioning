@@ -46,6 +46,15 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var scanning = false
     @Published private(set) var scanError: String?
 
+    /// Include pouch devices not in provisioning mode in scans (CLI `discover --all`).
+    @Published var scanAll = false
+
+    @Published private(set) var sessionEncrypted = false
+
+    @Published private(set) var ctrlBusy = false
+    @Published private(set) var ctrlError: String?
+    @Published private(set) var ctrlDone: String?
+
     // MARK: - selected device
 
     @Published private(set) var selected: PouchProvDevice?
@@ -98,7 +107,7 @@ final class AppViewModel: ObservableObject {
         scanning = true
         scanTask = Task {
             do {
-                for try await device in manager.scan(timeoutMs: 12_000) {
+                for try await device in manager.scan(timeoutMs: 12_000, includeAll: scanAll) {
                     if !devices.contains(where: { $0.identifier == device.identifier }) {
                         devices.append(device)
                     }
@@ -130,11 +139,37 @@ final class AppViewModel: ObservableObject {
         Task {
             do {
                 try await device.connect()
+                sessionEncrypted = device.encrypted
                 version = try await device.version()
             } catch {
                 connectError = "\(error)"
             }
             connecting = false
+        }
+    }
+
+    /// Run a device control op (authorizing first if the device requires PoP):
+    /// reset = clear Wi-Fi state, reprovision = wipe all stored credentials.
+    func deviceControl(pop: String, reprovision: Bool) {
+        guard let device = selected else { return }
+        ctrlError = nil
+        ctrlDone = nil
+        ctrlBusy = true
+        Task {
+            do {
+                if version?.popRequired == true {
+                    try await device.authorize(pop: pop)
+                }
+                if reprovision {
+                    try await device.reprovision()
+                } else {
+                    try await device.reset()
+                }
+                ctrlDone = reprovision ? "Credentials wiped" : "Wi-Fi state reset"
+            } catch {
+                ctrlError = "\(error)"
+            }
+            ctrlBusy = false
         }
     }
 

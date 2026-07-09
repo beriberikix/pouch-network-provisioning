@@ -69,7 +69,8 @@ The app must declare `NSBluetoothAlwaysUsageDescription` in its Info.plist
 
 ## On-device end-to-end
 
-1. Flash `samples/basic` (plaintext build) to an ESP32-S3 / nRF board.
+1. Flash `samples/basic` (plaintext) or `samples/basic` + `saead.conf`
+   (encrypted) to an ESP32-S3 / nRF board — the client autodetects which.
 2. Generate the project (`xcodegen generate`), open it in Xcode, set your
    signing team, and run on a connected iPhone.
 3. In the app: Scan → Select the `PVN-…` device → accept the pairing prompt →
@@ -94,11 +95,15 @@ The app must declare `NSBluetoothAlwaysUsageDescription` in its Info.plist
 
 ## Status
 
-Plaintext (`ENCRYPTION_NONE`) path, matching the CLI's live functional level and
-the Android SDK. Follow-ups, tracked at parity with Android:
+Feature parity with the CLI and the Android SDK. The SDK speaks both pouch
+framings and autodetects per device: plaintext (`ENCRYPTION_NONE`) or the saead
+encrypted session (TOFU cert exchange + ECDH/HKDF/per-block AEAD on
+swift-crypto), surfaced as `PouchProvDevice.encrypted`. SDK verbs also cover
+`credStatus()`, `reset()`, `reprovision()`, and scan-all discovery; the app adds
+Golioth / self-signed / upload credential modes and device controls.
 
-- saead encrypted session behind the `SessionCrypto` seam in `PouchProvCore`
-  (the Python `pouchlink/saead.py` is the reference).
+Remaining follow-ups:
+
 - Swift 6 strict-concurrency language mode (the package builds in `.v5` mode
   today; the CoreBluetooth delegate bridge needs a Sendable audit first).
 - An on-device XCUITest analogue of Android's `HardwareProvisioningTest`.

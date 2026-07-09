@@ -22,7 +22,23 @@ class BleTransport(context: Context, device: BluetoothDevice) : Transport {
     override val downlink: Channel = BleChannel(gatt, BleUuids.DOWNLINK)
     override val uplink: Channel = BleChannel(gatt, BleUuids.UPLINK)
 
-    override suspend fun connect() = gatt.connect()
+    // saead-only SAR endpoints, populated after connect (their presence is the
+    // autodetection signal — saead is a compile-time firmware choice).
+    override var info: Channel? = null
+        private set
+    override var serverCert: Channel? = null
+        private set
+    override var deviceCert: Channel? = null
+        private set
+
+    override suspend fun connect() {
+        gatt.connect()
+        if (gatt.hasCharacteristic(BleUuids.SERVER_CERT)) {
+            info = BleChannel(gatt, BleUuids.INFO)
+            serverCert = BleChannel(gatt, BleUuids.SERVER_CERT)
+            deviceCert = BleChannel(gatt, BleUuids.DEVICE_CERT)
+        }
+    }
 
     override suspend fun disconnect() = gatt.disconnect()
 

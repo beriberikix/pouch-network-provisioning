@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
@@ -78,7 +79,8 @@ fun DeviceScreen(vm: ProvViewModel) {
             connecting -> ConnectingCard()
             connectError != null -> ConnectErrorCard(connectError!!, onRetry = { vm.select(dev) }, onRepair = { vm.forgetAndRepair() })
             version != null -> {
-                DeviceInfoCard(version!!)
+                val encrypted by vm.sessionEncrypted.collectAsState()
+                DeviceInfoCard(version!!, encrypted)
                 if (provisioning) {
                     ProvisionProgress(provisionState, onDone = { vm.back() }, onAgain = { vm.resetProvision() })
                 } else {
@@ -129,12 +131,13 @@ private fun ConnectErrorCard(message: String, onRetry: () -> Unit, onRepair: () 
 }
 
 @Composable
-private fun DeviceInfoCard(info: VersionInfo) {
+private fun DeviceInfoCard(info: VersionInfo, encrypted: Boolean) {
     Card(Modifier.fillMaxWidth().padding(top = 16.dp)) {
         Column(Modifier.padding(16.dp)) {
             Text("Device", style = MaterialTheme.typography.titleMedium)
             Text(
-                "protocol v${info.proto} · lib ${info.lib} · block ${info.blockSize} B",
+                "protocol v${info.proto} · lib ${info.lib} · block ${info.blockSize} B · " +
+                    if (encrypted) "encrypted (saead)" else "plaintext session",
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(top = 2.dp),
             )
@@ -306,6 +309,52 @@ private fun ProvisionForm(vm: ProvViewModel, info: VersionInfo, defaultCn: Strin
             },
             modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
         ) { Text(if (!hasCred && !hasWifi) "Finish" else "Provision") }
+
+        DeviceControls(vm, pop = pop)
+    }
+}
+
+@Composable
+private fun DeviceControls(vm: ProvViewModel, pop: String) {
+    val busy by vm.ctrlBusy.collectAsState()
+    val error by vm.ctrlError.collectAsState()
+    val done by vm.ctrlDone.collectAsState()
+    var confirmReprovision by remember { mutableStateOf(false) }
+
+    SectionTitle("Device controls")
+    Row(
+        Modifier.fillMaxWidth().padding(top = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        OutlinedButton(onClick = { vm.deviceControl(pop, reprovision = false) }, enabled = !busy) {
+            Text("Reset Wi-Fi")
+        }
+        OutlinedButton(onClick = { confirmReprovision = true }, enabled = !busy) {
+            Text("Factory reset")
+        }
+        if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+    }
+    done?.let { Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp)) }
+    error?.let {
+        Text("Error: $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+    }
+
+    if (confirmReprovision) {
+        AlertDialog(
+            onDismissRequest = { confirmReprovision = false },
+            title = { Text("Factory reset provisioning?") },
+            text = { Text("This wipes ALL stored Wi-Fi and cloud credentials on the device.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmReprovision = false
+                    vm.deviceControl(pop, reprovision = true)
+                }) { Text("Wipe") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmReprovision = false }) { Text("Cancel") }
+            },
+        )
     }
 }
 
@@ -330,7 +379,12 @@ private fun SsidPicker(networks: List<ScanEntry>, selected: String, onSelect: (S
             networks.forEach { entry ->
                 val name = String(entry.ssid)
                 DropdownMenuItem(
-                    text = { Text(if (name.isEmpty()) "(hidden)" else "$name   ${entry.rssi} dBm") },
+                    text = {
+                        Text(
+                            if (name.isEmpty()) "(hidden)"
+                            else "$name   ${entry.rssi} dBm   ${entry.authName}",
+                        )
+                    },
                     onClick = { onSelect(name); expanded = false },
                 )
             }

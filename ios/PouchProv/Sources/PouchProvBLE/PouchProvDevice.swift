@@ -21,6 +21,15 @@ public final class PouchProvDevice: Identifiable, @unchecked Sendable {
     public let name: String?
     public let rssi: Int
 
+    /// Whether the device advertised the provisioning flag (it may be a plain pouch device).
+    public let provisioning: Bool
+
+    /// Pouch protocol version from the advertisement's service data (0 if unknown).
+    public let pouchVersion: Int
+
+    /// Pouch GATT transport version from the advertisement's service data (0 if unknown).
+    public let gattVersion: Int
+
     /// CoreBluetooth's stable per-device identifier (no MAC address on iOS).
     public var identifier: UUID { peripheral.identifier }
     public var id: UUID { peripheral.identifier }
@@ -31,16 +40,30 @@ public final class PouchProvDevice: Identifiable, @unchecked Sendable {
     /// Whether the mutual PoP handshake has already succeeded on this session.
     private var authorized = false
 
+    /// Whether the open session speaks the encrypted (saead) pouch framing.
+    public private(set) var encrypted = false
+
     private let stateSubject = CurrentValueSubject<ProvisionState, Never>(.idle)
 
     /// Live provisioning progress, primarily for driving a UI.
     public var state: ProvisionState { stateSubject.value }
     public var statePublisher: AnyPublisher<ProvisionState, Never> { stateSubject.eraseToAnyPublisher() }
 
-    init(hub: CentralHub, peripheral: CBPeripheral, name: String?, rssi: Int) {
+    init(
+        hub: CentralHub,
+        peripheral: CBPeripheral,
+        name: String?,
+        rssi: Int,
+        provisioning: Bool = true,
+        pouchVersion: Int = 0,
+        gattVersion: Int = 0
+    ) {
         self.peripheral = peripheral
         self.name = name
         self.rssi = rssi
+        self.provisioning = provisioning
+        self.pouchVersion = pouchVersion
+        self.gattVersion = gattVersion
         self.transport = BleTransport(gatt: GattClient(hub: hub, peripheral: peripheral))
     }
 
@@ -50,10 +73,22 @@ public final class PouchProvDevice: Identifiable, @unchecked Sendable {
     }
 
     /// Connect, pair/encrypt, discover the pouch service, and open a session.
+    /// On a saead firmware build (autodetected from the GATT service) this runs
+    /// the TOFU cert exchange and the session speaks encrypted pouches.
     public func connect() async throws {
         stateSubject.send(.connecting)
         try await transport.connect()
-        session = ProvSession(transport: transport, maxlen: transport.maxlen)
+        if transport.supportsSaead {
+            let identity = try serverIdentity()
+            let saead = try await Tofu.secureSession(transport, identity: identity, maxlen: transport.maxlen)
+            session = ProvSession(
+                transport: transport, maxlen: transport.maxlen, crypto: SaeadCrypto(saead)
+            )
+            encrypted = true
+        } else {
+            session = ProvSession(transport: transport, maxlen: transport.maxlen)
+            encrypted = false
+        }
         authorized = false
     }
 
@@ -61,6 +96,17 @@ public final class PouchProvDevice: Identifiable, @unchecked Sendable {
         await transport.disconnect()
         session = nil
         authorized = false
+        encrypted = false
+    }
+
+    // Fresh per device instance; the device re-learns it via the TOFU exchange.
+    private var cachedIdentity: Tofu.ServerIdentity?
+
+    private func serverIdentity() throws -> Tofu.ServerIdentity {
+        if let cachedIdentity { return cachedIdentity }
+        let identity = try Tofu.generateServerIdentity()
+        cachedIdentity = identity
+        return identity
     }
 
     /// Query `.prov/ver`.
@@ -97,6 +143,21 @@ public final class PouchProvDevice: Identifiable, @unchecked Sendable {
             keyDer: try Pem.toDer(key),
             caDer: try ca.map { try Pem.toDer($0) }
         )
+    }
+
+    /// Per-kind byte counts of credentials the device has received.
+    public func credStatus() async throws -> [CredKind: Int] {
+        try await Flows.credStatus(requireSession())
+    }
+
+    /// Reset the device's Wi-Fi state machine (credentials are kept).
+    public func reset() async throws {
+        try await Flows.reset(requireSession())
+    }
+
+    /// Wipe stored Wi-Fi and cloud credentials (factory reset provisioning).
+    public func reprovision() async throws {
+        try await Flows.reprovision(requireSession())
     }
 
     /// End the session; the device proceeds to normal operation.

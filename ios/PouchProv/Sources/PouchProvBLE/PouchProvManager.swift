@@ -22,7 +22,14 @@ public final class PouchProvManager: @unchecked Sendable {
     /// set. Yields a ``PouchProvDevice`` the first time each device is seen. The
     /// stream runs until cancelled or `timeoutMs` elapses; it throws if Bluetooth
     /// is off, unauthorized or unavailable.
-    public func scan(timeoutMs: Int64 = 10_000) -> AsyncThrowingStream<PouchProvDevice, Error> {
+    ///
+    /// With `includeAll`, pouch devices *not* in provisioning mode are yielded too
+    /// (mirrors the CLI's `discover --all`); check ``PouchProvDevice/provisioning``
+    /// before connecting.
+    public func scan(
+        timeoutMs: Int64 = 10_000,
+        includeAll: Bool = false
+    ) -> AsyncThrowingStream<PouchProvDevice, Error> {
         AsyncThrowingStream { continuation in
             let seen = SeenSet()
             let scanTask = Task { [hub] in
@@ -38,8 +45,11 @@ public final class PouchProvManager: @unchecked Sendable {
                           let data = serviceData[BleUuids.serviceUuid16],
                           data.count >= 2
                     else { return }
-                    let flags = [UInt8](data)[1]
-                    guard flags & BleUuids.advFlagProvisioning != 0 else { return }
+                    let bytes = [UInt8](data)
+                    let version = Int(bytes[0])
+                    let flags = bytes[1]
+                    let provisioning = flags & BleUuids.advFlagProvisioning != 0
+                    guard includeAll || provisioning else { return }
                     guard seen.insert(peripheral.identifier) else { return }
                     let name = (advertisementData[CBAdvertisementDataLocalNameKey] as? String)
                         ?? peripheral.name
@@ -47,7 +57,10 @@ public final class PouchProvManager: @unchecked Sendable {
                         hub: hub,
                         peripheral: peripheral,
                         name: name,
-                        rssi: rssi.intValue
+                        rssi: rssi.intValue,
+                        provisioning: provisioning,
+                        pouchVersion: version >> 4,
+                        gattVersion: version & 0x0F
                     ))
                 }
                 try? await Task.sleep(nanoseconds: UInt64(max(timeoutMs, 0)) * 1_000_000)

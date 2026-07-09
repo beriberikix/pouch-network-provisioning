@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import datetime
 import hashlib
+import secrets
 from dataclasses import dataclass
 
 from cryptography import x509
@@ -58,6 +59,85 @@ def generate_server_identity(common_name: str = "pouch-prov-cli") -> Identity:
         .sign(key, hashes.SHA256())
     )
     return Identity(key, cert.public_bytes(serialization.Encoding.DER))
+
+
+@dataclass
+class Credentials:
+    """PEM-encoded credentials (accepted directly by the provision path)."""
+
+    cert_pem: bytes
+    key_pem: bytes
+
+
+def _new_key() -> ec.EllipticCurvePrivateKey:
+    return ec.generate_private_key(ec.SECP256R1())
+
+
+def _key_pem(key: ec.EllipticCurvePrivateKey) -> bytes:
+    return key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    )
+
+
+def _build_cert(subject: x509.Name, issuer: x509.Name, public_key: ec.EllipticCurvePublicKey,
+                signing_key: ec.EllipticCurvePrivateKey, validity_days: int,
+                ca: bool) -> x509.Certificate:
+    """Mirror of the mobile SDKs' DeviceCert.buildCert: SHA256withECDSA, 64-bit
+    random serial, 60 s notBefore backdate for clock skew."""
+    now = datetime.datetime.now(datetime.timezone.utc)
+    builder = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(issuer)
+        .public_key(public_key)
+        .serial_number(secrets.randbits(64) or 1)
+        .not_valid_before(now - datetime.timedelta(seconds=60))
+        .not_valid_after(now + datetime.timedelta(days=validity_days))
+    )
+    if ca:
+        builder = builder.add_extension(
+            x509.BasicConstraints(ca=True, path_length=None), critical=True
+        ).add_extension(
+            x509.KeyUsage(
+                digital_signature=False, content_commitment=False, key_encipherment=False,
+                data_encipherment=False, key_agreement=False, key_cert_sign=True,
+                crl_sign=True, encipher_only=False, decipher_only=False,
+            ),
+            critical=True,
+        )
+    return builder.sign(signing_key, hashes.SHA256())
+
+
+def generate_self_signed(common_name: str, validity_days: int = 28) -> Credentials:
+    """P-256 key pair + self-signed certificate with CN=common_name."""
+    key = _new_key()
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
+    cert = _build_cert(name, name, key.public_key(), key, validity_days, ca=False)
+    return Credentials(cert.public_bytes(serialization.Encoding.PEM), _key_pem(key))
+
+
+def generate_ca(common_name: str, validity_days: int = 28) -> Credentials:
+    """P-256 key pair + self-signed CA certificate (CA:TRUE, keyCertSign|cRLSign)."""
+    key = _new_key()
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
+    cert = _build_cert(name, name, key.public_key(), key, validity_days, ca=True)
+    return Credentials(cert.public_bytes(serialization.Encoding.PEM), _key_pem(key))
+
+
+def sign_device_cert(ca: Credentials, device_common_name: str,
+                     validity_days: int = 28) -> Credentials:
+    """Device key pair + certificate with CN=device_common_name signed by *ca*."""
+    ca_cert = x509.load_pem_x509_certificate(ca.cert_pem)
+    ca_key = serialization.load_pem_private_key(ca.key_pem, password=None)
+    if not isinstance(ca_key, ec.EllipticCurvePrivateKey):
+        raise ValueError("CA key is not an EC key")
+    key = _new_key()
+    subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, device_common_name)])
+    cert = _build_cert(subject, ca_cert.subject, key.public_key(), ca_key,
+                       validity_days, ca=False)
+    return Credentials(cert.public_bytes(serialization.Encoding.PEM), _key_pem(key))
 
 
 def device_public_key(cert_der: bytes) -> ec.EllipticCurvePublicKey:

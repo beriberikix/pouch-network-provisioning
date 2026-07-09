@@ -29,6 +29,19 @@ interface Transport {
     /** device -> client responses */
     val uplink: Channel
 
+    // saead-only SAR endpoints (pouch GATT exposes them only on saead builds;
+    // null when absent). info is a device-side sender, serverCert a receiver,
+    // deviceCert a sender — all raw payloads, not pouch-framed.
+    val info: Channel? get() = null
+    val serverCert: Channel? get() = null
+    val deviceCert: Channel? get() = null
+
+    /**
+     * Whether the device firmware is a saead build (compile-time feature,
+     * detected from the presence of the server-cert endpoint).
+     */
+    val supportsSaead: Boolean get() = serverCert != null
+
     suspend fun connect()
 
     suspend fun disconnect()

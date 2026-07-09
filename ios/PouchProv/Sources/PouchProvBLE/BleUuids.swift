@@ -25,8 +25,14 @@ public enum BleUuids {
     /// client -> device requests (write + notify).
     public static let downlink = CBUUID(string: "89A316AE-89B7-4EF6-B1D3-5C9A6E27D274")
 
-    /// read-only info characteristic ({flags, server_cert_snr}).
+    /// info SAR endpoint ({flags, server_cert_snr}; device-side sender).
     public static let info = CBUUID(string: "89A316AE-89B7-4EF6-B1D3-5C9A6E27D275")
+
+    /// server-cert SAR endpoint (client pushes its cert; saead builds only).
+    public static let serverCert = CBUUID(string: "89A316AE-89B7-4EF6-B1D3-5C9A6E27D276")
+
+    /// device-cert SAR endpoint (device sends its identity cert; saead builds only).
+    public static let deviceCert = CBUUID(string: "89A316AE-89B7-4EF6-B1D3-5C9A6E27D277")
 
     // Advertising flags byte (pouch service data): bit1 = provisioning available.
     public static let advFlagSyncRequest: UInt8 = 0x01

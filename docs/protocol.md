@@ -53,6 +53,18 @@ content type 60 (CBOR), carried over pouch's BLE GATT transport
 (service `0xFC49`). Requests are downlink entries (client → device);
 responses are uplink entries on the **same path**.
 
+Besides the `downlink`/`uplink` characteristics, the pouch service exposes
+an `info` SAR endpoint (`…d275`, CBOR `{flags, server_cert_snr}`) and — on
+saead builds only — `server_cert` (`…d276`, client → device) and
+`device_cert` (`…d277`, device → client) for the TOFU cert exchange. All
+five are ordinary pouch SAR endpoints (subscribe + SAR cycle; `info` is
+**not** a plain GATT read) carrying raw payloads, not pouch frames.
+Clients autodetect the firmware's encryption mode from the presence of
+`server_cert` after service discovery: present ⇒ run the cert exchange
+and speak saead; absent ⇒ plaintext. When comparing `server_cert_snr`
+against a certificate serial, strip leading zero bytes on both sides
+(mbedtls keeps the DER sign byte; most big-int serializations do not).
+
 ### Advertising
 
 Service Data (UUID16 `0xFC49`): `{version, flags}` per pouch's GATT
@@ -146,6 +158,19 @@ stored cloud credentials so a device can be re-provisioned from scratch.
 (`off` strictly increasing); `finalize` validates (certificate must
 parse) and persists atomically. Request op `3` is **reserved** for a
 phase-2 CSR flow (device-generated key; private key never transits).
+
+`.prov/scan` entry `auth` is Zephyr's `enum wifi_security_type`, carried
+verbatim. Clients display it with these names (unknown values render
+`unknown(N)`):
+
+| auth | name | auth | name |
+|---|---|---|---|
+| 0 | Open | 6 | WAPI |
+| 1 | WPA2-PSK | 7 | EAP-TLS |
+| 2 | WPA2-PSK-SHA256 | 8 | WEP |
+| 3 | WPA3-SAE | 9 | WPA-PSK |
+| 4 | WPA3-SAE-H2E | 10 | WPA/WPA2-Auto |
+| 5 | WPA3-SAE-AUTO | 11 | DPP |
 
 ## Authorization (`.prov/auth`)
 

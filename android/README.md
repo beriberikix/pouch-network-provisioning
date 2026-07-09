@@ -63,7 +63,8 @@ Runtime permissions the app must request: `BLUETOOTH_SCAN` + `BLUETOOTH_CONNECT`
 
 ## On-device end-to-end
 
-1. Flash `samples/basic` (plaintext build) to an ESP32-S3 / nRF board.
+1. Flash `samples/basic` (plaintext) or `samples/basic` + `saead.conf`
+   (encrypted) to an ESP32-S3 / nRF board — the client autodetects which.
 2. `./gradlew :app:installDebug` on a connected phone (`adb devices` to confirm).
 3. In the app: Scan → Select the `PVN-…` device → enter the PoP → Provision.
 4. Confirm on the device console it received the `.prov/*` entries and reported
@@ -72,6 +73,11 @@ Runtime permissions the app must request: `BLUETOOTH_SCAN` + `BLUETOOTH_CONNECT`
 
 ## Status
 
-Plaintext (`ENCRYPTION_NONE`) path, matching the CLI's live functional level. The
-saead encrypted session is a follow-up behind the `SessionCrypto` seam in
-`pouchprov-core`.
+Feature parity with the CLI. The SDK speaks both pouch framings and autodetects
+per device: plaintext (`ENCRYPTION_NONE`) or the saead encrypted session (TOFU
+cert exchange + ECDH/HKDF/per-block AEAD), surfaced as
+`PouchProvDevice.encrypted`. ChaCha20-Poly1305 uses Bouncy Castle's lightweight
+API (the JCA cipher needs Android API 28+, and Android's preinstalled BC
+provider is crippled); AES-GCM and ECDH use the platform JCA. SDK verbs also
+cover `credStatus()`, `reset()`, `reprovision()`, and scan-all discovery; the
+app adds Golioth / self-signed / upload credential modes and device controls.

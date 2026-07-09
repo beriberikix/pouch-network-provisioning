@@ -6,9 +6,12 @@ package io.golioth.pouchprov.session
 import io.golioth.pouchprov.pouch.Entry
 import io.golioth.pouchprov.pouch.Pouch
 import io.golioth.pouchprov.pouch.PouchHeader
+import io.golioth.pouchprov.saead.Saead
+import io.golioth.pouchprov.saead.SaeadSession
 import io.golioth.pouchprov.sar.SarReceiver
 import io.golioth.pouchprov.sar.SarSender
 import io.golioth.pouchprov.transport.Transport
+import java.security.SecureRandom
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -32,6 +35,30 @@ object PlaintextCrypto : SessionCrypto {
         Pouch.buildEntryPouch(deviceId.ifEmpty { "?" }, entries, blockSize)
 
     override fun parseResponse(data: ByteArray): Pair<PouchHeader, List<Entry>> = Pouch.parsePouch(data)
+}
+
+/**
+ * Encrypted (saead) framing over a [SaeadSession]. Each request pouch starts a
+ * fresh random downlink session; the uplink session is adopted from the device's
+ * response header. An empty (header-only) uplink pouch means "not ready".
+ */
+class SaeadCrypto(
+    private val saead: SaeadSession,
+    private val sessionIdSource: () -> ByteArray = {
+        ByteArray(Saead.SESSION_ID_LEN).also { SecureRandom().nextBytes(it) }
+    },
+) : SessionCrypto {
+    override fun buildRequest(entries: List<Entry>, deviceId: String, blockSize: Int): ByteArray =
+        Saead.buildDownlinkPouch(saead, sessionIdSource(), entries, blockSize = blockSize)
+
+    override fun parseResponse(data: ByteArray): Pair<PouchHeader, List<Entry>> {
+        val (header, consumed) = PouchHeader.decode(data)
+        if (header.encryption == Pouch.ENCRYPTION_SAEAD) {
+            // A header-only uplink pouch still parses to no entries ("not ready").
+            return if (data.size > consumed) header to Saead.parseUplinkPouch(saead, data) else header to emptyList()
+        }
+        return Pouch.parsePouch(data)
+    }
 }
 
 class SessionError(message: String) : Exception(message)

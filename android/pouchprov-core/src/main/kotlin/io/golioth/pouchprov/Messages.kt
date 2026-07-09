@@ -300,11 +300,30 @@ data class ScanEntry(
     val rssi: Int,
     val auth: Int,
 ) {
+    val authName: String get() = securityName(auth)
+
     override fun equals(other: Any?): Boolean =
         other is ScanEntry && ssid.contentEquals(other.ssid) && bssid.contentEquals(other.bssid) &&
             channel == other.channel && rssi == other.rssi && auth == other.auth
 
     override fun hashCode(): Int = ssid.contentHashCode()
+}
+
+/** Human-readable name for a Wi-Fi security type (Zephyr enum wifi_security_type). */
+fun securityName(auth: Int): String = when (auth) {
+    0 -> "Open"
+    1 -> "WPA2-PSK"
+    2 -> "WPA2-PSK-SHA256"
+    3 -> "WPA3-SAE"
+    4 -> "WPA3-SAE-H2E"
+    5 -> "WPA3-SAE-AUTO"
+    6 -> "WAPI"
+    7 -> "EAP-TLS"
+    8 -> "WEP"
+    9 -> "WPA-PSK"
+    10 -> "WPA/WPA2-Auto"
+    11 -> "DPP"
+    else -> "unknown($auth)"
 }
 
 // ---- exceptions ----------------------------------------------------------

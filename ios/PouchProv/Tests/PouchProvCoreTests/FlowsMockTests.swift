@@ -70,6 +70,30 @@ final class FlowsMockTests: XCTestCase {
         XCTAssertTrue(device.ended)
     }
 
+    func testCtrlOpsAndCredStatus() async throws {
+        let device = DeviceSim(pop: pop, caps: ["wifi", "scan", "cred", "auth"])
+        let session = ProvSession(transport: MockDeviceTransport(handler: device.handle))
+
+        let info = try await Flows.getVersion(session)
+        try await Flows.authorizeIfNeeded(session, info: info, pop: pop)
+
+        try await Flows.bootstrapCredentials(
+            session,
+            certDer: Data(repeating: 1, count: 500),
+            keyDer: Data(repeating: 2, count: 120)
+        )
+        let before = try await Flows.credStatus(session)
+        XCTAssertEqual([.deviceCert: 500, .privateKey: 120], before)
+
+        try await Flows.reset(session)
+        XCTAssertTrue(device.wifiReset)
+
+        try await Flows.reprovision(session)
+        XCTAssertTrue(device.reprovisioned)
+        let after = try await Flows.credStatus(session)
+        XCTAssertEqual([:], after)
+    }
+
     func testWrongPopFailsBeforeSendingClientProof() async throws {
         let device = DeviceSim(pop: "correct", caps: ["cred", "auth"])
         let session = ProvSession(transport: MockDeviceTransport(handler: device.handle))
@@ -104,6 +128,8 @@ private final class DeviceSim: @unchecked Sendable {
     var wifiSsid: Data?
     var credFinalized = false
     var ended = false
+    var wifiReset = false
+    var reprovisioned = false
     private var creds: [CredKind: Int] = [:]
     private let devNonce = Data((0..<16).map { UInt8(0x40 + $0) })
 
@@ -185,7 +211,14 @@ private final class DeviceSim: @unchecked Sendable {
                 return Cbor.encode(.array([.int(2), .int(0), .map(pairs)]))
             }
         case Messages.pathCtrl:
-            if op == CtrlOp.end.rawValue { ended = true }
+            switch op {
+            case CtrlOp.end.rawValue: ended = true
+            case CtrlOp.reset.rawValue: wifiReset = true
+            case CtrlOp.reprovision.rawValue:
+                reprovisioned = true
+                creds.removeAll()
+            default: break
+            }
             return Cbor.encode(.array([.int(Int64(op)), .int(0)]))
         default:
             return nil

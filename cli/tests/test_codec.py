@@ -109,3 +109,31 @@ class TestResponseDecoding:
     def test_wrong_op_rejected(self):
         with pytest.raises(codec.DecodeError):
             codec.decode_ver_rsp(RSP["config_set_rsp"])
+
+
+class TestSecurityName:
+    def test_known_types(self):
+        expected = {
+            0: "Open",
+            1: "WPA2-PSK",
+            2: "WPA2-PSK-SHA256",
+            3: "WPA3-SAE",
+            4: "WPA3-SAE-H2E",
+            5: "WPA3-SAE-AUTO",
+            6: "WAPI",
+            7: "EAP-TLS",
+            8: "WEP",
+            9: "WPA-PSK",
+            10: "WPA/WPA2-Auto",
+            11: "DPP",
+        }
+        for auth, name in expected.items():
+            assert codec.security_name(auth) == name
+
+    def test_unknown_type(self):
+        assert codec.security_name(42) == "unknown(42)"
+        assert codec.security_name(-1) == "unknown(-1)"
+
+    def test_scan_entry_auth_name(self):
+        entry = codec.ScanEntry(ssid=b"x", bssid=b"", channel=1, rssi=-40, auth=3)
+        assert entry.auth_name == "WPA3-SAE"

@@ -77,3 +77,54 @@ def test_info_decode():
 def test_info_no_cert():
     parsed = info.GattInfo.decode(cbor2.dumps({"flags": 0, "server_cert_snr": b""}))
     assert not parsed.has_server_cert
+
+
+class TestMintedCredentials:
+    """Local cert generation mirroring the mobile SDKs' DeviceCert."""
+
+    def test_self_signed(self):
+        import datetime
+
+        from cryptography import x509
+
+        creds = cert.generate_self_signed("my-device", validity_days=7)
+        parsed = x509.load_pem_x509_certificate(creds.cert_pem)
+        cn = parsed.subject.get_attributes_for_oid(x509.oid.NameOID.COMMON_NAME)
+        assert cn[0].value == "my-device"
+        assert parsed.issuer == parsed.subject
+        now = datetime.datetime.now(datetime.timezone.utc)
+        assert parsed.not_valid_before_utc <= now  # 60s backdate
+        assert abs((parsed.not_valid_after_utc - now).days - 7) <= 1
+        # key PEM parses and matches the cert's public key
+        from cryptography.hazmat.primitives import serialization
+
+        key = serialization.load_pem_private_key(creds.key_pem, password=None)
+        assert key.public_key().public_numbers() == parsed.public_key().public_numbers()
+
+    def test_ca_and_signed_device_cert(self):
+        from cryptography import x509
+        from cryptography.hazmat.primitives.asymmetric import ec as ec_mod
+
+        ca = cert.generate_ca("pouch-demo-CA")
+        ca_cert = x509.load_pem_x509_certificate(ca.cert_pem)
+        bc = ca_cert.extensions.get_extension_for_class(x509.BasicConstraints)
+        assert bc.value.ca and bc.critical
+        ku = ca_cert.extensions.get_extension_for_class(x509.KeyUsage)
+        assert ku.value.key_cert_sign and ku.value.crl_sign
+
+        dev = cert.sign_device_cert(ca, "dev-42")
+        dev_cert = x509.load_pem_x509_certificate(dev.cert_pem)
+        assert dev_cert.issuer == ca_cert.subject
+        cn = dev_cert.subject.get_attributes_for_oid(x509.oid.NameOID.COMMON_NAME)
+        assert cn[0].value == "dev-42"
+        # signature verifies against the CA public key
+        ca_cert.public_key().verify(
+            dev_cert.signature,
+            dev_cert.tbs_certificate_bytes,
+            ec_mod.ECDSA(dev_cert.signature_hash_algorithm),
+        )
+
+    def test_pem_round_trip_through_pem_to_der(self):
+        creds = cert.generate_self_signed("x")
+        assert cert.pem_to_der(creds.cert_pem)[:1] == b"\x30"
+        assert cert.pem_to_der(creds.key_pem)[:1] == b"\x30"

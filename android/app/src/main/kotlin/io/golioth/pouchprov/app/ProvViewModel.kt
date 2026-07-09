@@ -61,6 +61,29 @@ class ProvViewModel(app: Application) : AndroidViewModel(app) {
     private val _scanning = MutableStateFlow(false)
     val scanning: StateFlow<Boolean> = _scanning.asStateFlow()
 
+    private val _sessionEncrypted = MutableStateFlow(false)
+
+    /** Whether the open session speaks the encrypted (saead) pouch framing. */
+    val sessionEncrypted: StateFlow<Boolean> = _sessionEncrypted.asStateFlow()
+
+    private val _ctrlBusy = MutableStateFlow(false)
+    val ctrlBusy: StateFlow<Boolean> = _ctrlBusy.asStateFlow()
+
+    private val _ctrlError = MutableStateFlow<String?>(null)
+    val ctrlError: StateFlow<String?> = _ctrlError.asStateFlow()
+
+    private val _ctrlDone = MutableStateFlow<String?>(null)
+    val ctrlDone: StateFlow<String?> = _ctrlDone.asStateFlow()
+
+    private val _scanAll = MutableStateFlow(false)
+
+    /** Include pouch devices not in provisioning mode in scans (CLI `discover --all`). */
+    val scanAll: StateFlow<Boolean> = _scanAll.asStateFlow()
+
+    fun setScanAll(value: Boolean) {
+        _scanAll.value = value
+    }
+
     // -- selected device ---------------------------------------------------
     private val _selected = MutableStateFlow<PouchProvDevice?>(null)
     val selected: StateFlow<PouchProvDevice?> = _selected.asStateFlow()
@@ -180,7 +203,7 @@ class ProvViewModel(app: Application) : AndroidViewModel(app) {
         _scanning.value = true
         scanJob = viewModelScope.launch {
             try {
-                manager.scan(timeoutMs = 12_000).collect { device ->
+                manager.scan(timeoutMs = 12_000, includeAll = _scanAll.value).collect { device ->
                     if (_devices.value.none { it.address == device.address }) {
                         _devices.value = _devices.value + device
                     }
@@ -211,12 +234,37 @@ class ProvViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 withContext(Dispatchers.IO) {
                     device.connect()
+                    _sessionEncrypted.value = device.encrypted
                     _version.value = device.version()
                 }
             } catch (e: Exception) {
                 _connectError.value = e.message ?: e.toString()
             } finally {
                 _connecting.value = false
+            }
+        }
+    }
+
+    /**
+     * Run a device control op (authorizing first if the device requires PoP):
+     * reset = clear Wi-Fi state, reprovision = wipe all stored credentials.
+     */
+    fun deviceControl(pop: String, reprovision: Boolean) {
+        val device = _selected.value ?: return
+        _ctrlError.value = null
+        _ctrlBusy.value = true
+        _ctrlDone.value = null
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    if (_version.value?.popRequired == true) device.authorize(pop)
+                    if (reprovision) device.reprovision() else device.reset()
+                }
+                _ctrlDone.value = if (reprovision) "Credentials wiped" else "Wi-Fi state reset"
+            } catch (e: Exception) {
+                _ctrlError.value = e.message ?: e.toString()
+            } finally {
+                _ctrlBusy.value = false
             }
         }
     }

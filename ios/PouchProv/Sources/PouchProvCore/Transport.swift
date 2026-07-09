@@ -27,7 +27,24 @@ public protocol ProvTransport: AnyObject {
     /// device -> client responses
     var uplink: any ProvChannel { get }
 
+    // saead-only SAR endpoints (pouch GATT exposes them only on saead builds;
+    // nil when absent). info is a device-side sender, serverCert a receiver,
+    // deviceCert a sender — all raw payloads, not pouch-framed.
+    var info: (any ProvChannel)? { get }
+    var serverCert: (any ProvChannel)? { get }
+    var deviceCert: (any ProvChannel)? { get }
+
     func connect() async throws
 
     func disconnect() async
+}
+
+extension ProvTransport {
+    public var info: (any ProvChannel)? { nil }
+    public var serverCert: (any ProvChannel)? { nil }
+    public var deviceCert: (any ProvChannel)? { nil }
+
+    /// Whether the device firmware is a saead build (compile-time feature,
+    /// detected from the presence of the server-cert endpoint).
+    public var supportsSaead: Bool { serverCert != nil }
 }

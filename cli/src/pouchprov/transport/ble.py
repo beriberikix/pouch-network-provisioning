@@ -27,6 +27,8 @@ SVC_UUID = "89a316ae-89b7-4ef6-b1d3-5c9a6e27d272"
 UPLINK_UUID = "89a316ae-89b7-4ef6-b1d3-5c9a6e27d273"
 DOWNLINK_UUID = "89a316ae-89b7-4ef6-b1d3-5c9a6e27d274"
 INFO_UUID = "89a316ae-89b7-4ef6-b1d3-5c9a6e27d275"
+SERVER_CERT_UUID = "89a316ae-89b7-4ef6-b1d3-5c9a6e27d276"  # saead builds only
+DEVICE_CERT_UUID = "89a316ae-89b7-4ef6-b1d3-5c9a6e27d277"  # saead builds only
 
 ADV_FLAG_SYNC_REQUEST = 1 << 0
 ADV_FLAG_PROVISIONING = 1 << 1
@@ -116,6 +118,10 @@ class BleTransport(Transport):
         self._client: BleakClient | None = None
         self.downlink = _BleChannel(self._get_client, DOWNLINK_UUID)
         self.uplink = _BleChannel(self._get_client, UPLINK_UUID)
+        # Populated after connect when the device is a saead build.
+        self.info = None
+        self.server_cert = None
+        self.device_cert = None
 
     def _get_client(self) -> BleakClient:
         if self._client is None:
@@ -142,6 +148,13 @@ class BleTransport(Transport):
         self._client = BleakClient(target, timeout=self._timeout)
         await self._client.connect()
         logger.info("connected, MTU %d", self._client.mtu_size)
+        # saead builds expose server-cert/device-cert SAR endpoints; their
+        # presence is the autodetection signal (compile-time firmware choice).
+        if self._client.services.get_characteristic(SERVER_CERT_UUID) is not None:
+            self.info = _BleChannel(self._get_client, INFO_UUID)
+            self.server_cert = _BleChannel(self._get_client, SERVER_CERT_UUID)
+            self.device_cert = _BleChannel(self._get_client, DEVICE_CERT_UUID)
+            logger.info("device is a saead build")
         # The device sends an SMP Security Request on connect; let pairing
         # settle before any session I/O so the first writes land on an already
         # encrypted link (racing GATT traffic against pairing destabilises the

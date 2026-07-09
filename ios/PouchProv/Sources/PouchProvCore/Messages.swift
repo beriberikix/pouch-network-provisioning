@@ -378,6 +378,27 @@ public struct ScanEntry: Equatable, Sendable {
         self.rssi = rssi
         self.auth = auth
     }
+
+    public var authName: String { securityName(auth) }
+}
+
+/// Human-readable name for a Wi-Fi security type (Zephyr enum wifi_security_type).
+public func securityName(_ auth: Int) -> String {
+    switch auth {
+    case 0: return "Open"
+    case 1: return "WPA2-PSK"
+    case 2: return "WPA2-PSK-SHA256"
+    case 3: return "WPA3-SAE"
+    case 4: return "WPA3-SAE-H2E"
+    case 5: return "WPA3-SAE-AUTO"
+    case 6: return "WAPI"
+    case 7: return "EAP-TLS"
+    case 8: return "WEP"
+    case 9: return "WPA-PSK"
+    case 10: return "WPA/WPA2-Auto"
+    case 11: return "DPP"
+    default: return "unknown(\(auth))"
+    }
 }
 
 // MARK: - errors

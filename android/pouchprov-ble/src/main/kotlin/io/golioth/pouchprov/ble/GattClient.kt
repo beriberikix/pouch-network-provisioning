@@ -200,6 +200,9 @@ class GattClient(private val context: Context, private val device: BluetoothDevi
 
     // ---- operations ------------------------------------------------------
 
+    /** Whether the discovered services expose [uuid] (call after connect). */
+    fun hasCharacteristic(uuid: UUID): Boolean = runCatching { characteristic(uuid) }.isSuccess
+
     private fun characteristic(uuid: UUID): BluetoothGattCharacteristic {
         // The pouch peripheral declares its primary service with the 16-bit UUID
         // 0xFC49 (the 128-bit ...d272 is only used by pouch's central/broker
