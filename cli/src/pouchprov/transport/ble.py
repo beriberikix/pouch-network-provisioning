@@ -42,6 +42,15 @@ def _looks_like_address(target: str) -> bool:
     return len(target) == 36 and target.count("-") == 4 or target.count(":") == 5
 
 
+def _is_unlikely_error(exc: BleakError) -> bool:
+    """ATT error 0x0E (Unlikely Error): the device closed the endpoint."""
+    from bleak.exc import BleakGATTProtocolError
+
+    if isinstance(exc, BleakGATTProtocolError) and getattr(exc, "code", None) == 0x0E:
+        return True
+    return "Unlikely Error" in str(exc)
+
+
 @dataclass
 class Discovered:
     name: str
@@ -95,6 +104,14 @@ class _BleChannel(Channel):
                 await self._client_ref().write_gatt_char(self._uuid, data, response=True)
                 return
             except BleakError as exc:
+                # ATT "Unlikely Error" (0x0E) means the device already closed
+                # this SAR endpoint (e.g. it sent FIN and tore the endpoint down
+                # before our ACK landed). The write is effectively delivered;
+                # re-sending would wedge the device receiver, so treat it as
+                # done — matching the Android/iOS transports.
+                if _is_unlikely_error(exc):
+                    logger.debug("write got ATT 0x0E (endpoint closed); treating as delivered")
+                    return
                 if "Encryption" not in str(exc) or asyncio.get_running_loop().time() > deadline:
                     raise
                 await asyncio.sleep(0.4)
