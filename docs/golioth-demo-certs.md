@@ -131,26 +131,28 @@ across devices, so cache it.
 - **Secrets:** never hardcode the API key; read from env
   (`GOLIOTH_API_KEY`, `GOLIOTH_PROJECT_ID`) or a config file. Do not log it.
 
-### Python CLI (`cli/`)
+### Python CLI (`cli/`) — implemented
 
-- New module `cli/src/pouchprov/golioth.py`:
-  - `class GoliothClient(api_key, project_id, base_url="https://api.golioth.io")`
-    with `register_ca(cert_pem, *, demo=True) -> cert_id`, `list_certs()`,
-    `delete_cert(cert_id)`. Use `httpx`/`requests`; header `x-api-key`.
-  - `make_ca(name, days) -> (key_pem, cert_pem)` and
-    `sign_device_cert(ca_key_pem, ca_cert_pem, device_id, days) -> (key_pem, cert_pem)`
-    using the `cryptography` package (already a likely dep for `pouchlink/cert.py`).
-- New CLI command in `main.py`, e.g.:
+- [`cli/src/pouchprov/golioth.py`](../cli/src/pouchprov/golioth.py):
+  `GoliothCertProvider(api_key)` (stdlib `urllib`, header `x-api-key`) with
+  `project_id()` (discovered from the key, cached), `mint_device_credentials
+  (device_id, validity_days)`, `register_ca(ca_cert_pem)`, `list_cert_ids()`,
+  and `delete_cert(cert_id)` — a line-for-line port of the mobile providers.
+  The CA/device certs come from `pouchlink/cert.py` (`generate_ca`,
+  `sign_device_cert`).
+- The demo CA persists in `~/.pouchprov/golioth-demo-ca.{crt,key}.pem`
+  (`--state-dir` to override) and is reused across devices.
+- Mint-then-provision in one shot (CN = the session device id):
   ```
-  pouchprov golioth-cert --project $PROJECT_ID --device my-device \
-      [--api-key … | env GOLIOTH_API_KEY] [--ca-cache ~/.pouchprov/demo-ca] \
-      --out-cert device.crt.pem --out-key device.key.pem
+  pouchprov provision --pop … --golioth-api-key $GOLIOTH_API_KEY [--ssid …]
+  pouchprov provision --pop … --self-signed          # no Golioth, local only
   ```
-  Optionally add `--golioth-device NAME` directly to `provision` to do
-  mint-then-provision in one shot.
-- Reuse `pouchlink/cert.py` helpers for PEM/DER handling and align with
-  `tests/test_cert.py` conventions. Add `tests/test_golioth.py` mocking the HTTP
-  layer (no live calls in CI).
+  or mint offline (and optionally register the demo CA):
+  ```
+  pouchprov mint my-device --out certs/ [--golioth-api-key $GOLIOTH_API_KEY]
+  pouchprov provision --cert certs/my-device.crt.pem --key certs/my-device.key.pem
+  ```
+- `tests/test_golioth.py` fakes the HTTP layer (no live calls in CI).
 
 ### Mobile
 

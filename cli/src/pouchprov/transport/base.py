@@ -33,6 +33,19 @@ class Transport(ABC):
     downlink: Channel  # client -> device requests
     uplink: Channel  # device -> client responses
 
+    # saead-only SAR endpoints (pouch GATT exposes them only on saead builds;
+    # None when absent). info is a device-side sender, server_cert a receiver,
+    # device_cert a sender — all raw payloads, not pouch-framed.
+    info: Channel | None = None
+    server_cert: Channel | None = None
+    device_cert: Channel | None = None
+
+    @property
+    def supports_saead(self) -> bool:
+        """Whether the device firmware is a saead build (compile-time feature,
+        detected from the presence of the server-cert endpoint)."""
+        return self.server_cert is not None
+
     @abstractmethod
     async def connect(self) -> None: ...
 

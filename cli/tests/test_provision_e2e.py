@@ -148,3 +148,68 @@ async def test_gated_before_auth():
             await session.request(codec.PATH_CONFIG, codec.encode_config_get_status())
         )
     assert exc.value.status == codec.Status.UNAUTHORIZED
+
+
+def test_cli_provision_self_signed(monkeypatch, tmp_path):
+    """`pouchprov provision --self-signed` end-to-end via CliRunner: the minted
+    cert reaches the device and its CN is the session device id."""
+    from click.testing import CliRunner
+    from cryptography import x509
+
+    from pouchprov import main as cli_main
+    from pouchprov.transport.mock import MockDeviceTransport
+
+    device = FullDevice(POP, expected_ssid=None, expected_pass=None)
+
+    class CliMockTransport(MockDeviceTransport):
+        att_payload = 244
+
+        def __init__(self, name=None):
+            super().__init__(device.handle, device_id="cli-e2e-dev")
+
+    monkeypatch.setattr(cli_main.ble, "BleTransport", CliMockTransport)
+
+    result = CliRunner().invoke(
+        cli_main.cli,
+        ["provision", "--pop", POP, "--self-signed",
+         "--state-dir", str(tmp_path)],
+    )
+    assert result.exit_code == 0, result.output
+    assert device.cred_finalized
+
+    stored = x509.load_der_x509_certificate(device.creds[0])
+    cn = stored.subject.get_attributes_for_oid(x509.oid.NameOID.COMMON_NAME)[0].value
+    assert cn == "cli-e2e-dev"
+    assert "minted self-signed credentials" in result.output
+
+
+def test_cli_provision_autodetects_saead(monkeypatch, tmp_path):
+    """`pouchprov provision` against a saead-build mock: the session autodetects
+    the TOFU endpoints, exchanges certs, and provisions fully encrypted."""
+    from click.testing import CliRunner
+
+    from pouchprov import main as cli_main
+    from pouchprov.pouchlink import cert as certmod
+    from pouchprov.transport.mock import MockDeviceTransport
+
+    device = FullDevice(POP, expected_ssid=None, expected_pass=None)
+    identity = certmod.generate_server_identity(common_name="e2e-saead-dev")
+
+    class CliMockTransport(MockDeviceTransport):
+        att_payload = 244
+
+        def __init__(self, name=None):
+            super().__init__(device.handle, device_id="e2e-saead-dev",
+                             saead_identity=identity)
+
+    monkeypatch.setattr(cli_main.ble, "BleTransport", CliMockTransport)
+
+    result = CliRunner().invoke(
+        cli_main.cli,
+        ["provision", "--pop", POP, "--self-signed", "--state-dir", str(tmp_path)],
+    )
+    assert result.exit_code == 0, result.output
+    assert "session: saead (ChaCha20-Poly1305)" in result.output
+    assert device.cred_finalized
+    # The TOFU server identity persisted for reuse.
+    assert (tmp_path / "server_identity.crt.pem").exists()

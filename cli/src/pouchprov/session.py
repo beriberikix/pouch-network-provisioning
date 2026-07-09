@@ -42,6 +42,14 @@ class ProvSession:
         self.device_id = device_id  # from the plaintext response header
         self.block_size = 512  # updated from .prov/ver
 
+    @property
+    def maxlen(self) -> int:
+        return self._maxlen
+
+    @property
+    def encrypted(self) -> bool:
+        return self._saead is not None
+
     def enable_encryption(self, saead: SaeadSession) -> None:
         """Switch the session to encrypted (saead) framing."""
         self._saead = saead

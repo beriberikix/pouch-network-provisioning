@@ -201,6 +201,28 @@ def decode_config_apply_rsp(data: bytes) -> None:
 # ---- .prov/scan ------------------------------------------------------------
 
 
+# Zephyr enum wifi_security_type, carried verbatim in ScanEntry.auth.
+_SECURITY_NAMES = {
+    0: "Open",
+    1: "WPA2-PSK",
+    2: "WPA2-PSK-SHA256",
+    3: "WPA3-SAE",
+    4: "WPA3-SAE-H2E",
+    5: "WPA3-SAE-AUTO",
+    6: "WAPI",
+    7: "EAP-TLS",
+    8: "WEP",
+    9: "WPA-PSK",
+    10: "WPA/WPA2-Auto",
+    11: "DPP",
+}
+
+
+def security_name(auth: int) -> str:
+    """Human-readable name for a Wi-Fi security type."""
+    return _SECURITY_NAMES.get(auth, f"unknown({auth})")
+
+
 @dataclass
 class ScanEntry:
     ssid: bytes
@@ -208,6 +230,10 @@ class ScanEntry:
     channel: int
     rssi: int
     auth: int
+
+    @property
+    def auth_name(self) -> str:
+        return security_name(self.auth)
 
 
 def encode_scan_start(passive: bool | None = None, period_ms: int | None = None) -> bytes:

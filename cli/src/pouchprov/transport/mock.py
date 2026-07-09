@@ -15,9 +15,11 @@ import asyncio
 import struct
 from collections.abc import Callable
 
+import cbor2
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM, ChaCha20Poly1305
 
+from ..pouchlink import cert as certmod
 from ..pouchlink import pouch, saead
 from ..pouchlink import sar
 from .base import Channel, Transport
@@ -108,12 +110,101 @@ class _MockChannel(Channel):
             self._notify(bytes(data))
 
 
+class _DeviceSarSender:
+    """Device-side SAR sender behind a mock channel (info / device_cert)."""
+
+    def __init__(self, channel: _MockChannel, payload_fn: Callable[[], bytes],
+                 frag: int = 244 - sar.HEADER_LEN):
+        self._channel = channel
+        self._payload_fn = payload_fn
+        self._frag = frag
+        self._frags: list[bytes] = []
+        self._seq = 0
+        self._finished = False
+        channel.on_subscribe = self._open
+        channel.on_write = self._on_ack
+
+    def _open(self) -> None:
+        data = self._payload_fn()
+        self._frags = [data[i:i + self._frag] for i in range(0, len(data), self._frag)]
+        self._seq = 0
+        self._finished = False
+
+    def _on_ack(self, ack: bytes) -> None:
+        code, ack_seq, window = ack
+        assert code == sar.CODE_ACK
+        if self._finished:
+            return
+        if self._seq >= len(self._frags):
+            if ack_seq == (self._seq - 1) & 0xFF:
+                self._finished = True
+                self._channel.notify(bytes([sar.FLAG_FIN, sar.CODE_ACK]))
+            return
+        target = (ack_seq + window + 1) & 0xFF
+        while self._seq != target and self._seq < len(self._frags):
+            flags = 0
+            if self._seq == 0:
+                flags |= sar.FLAG_FIRST
+            if self._seq == len(self._frags) - 1:
+                flags |= sar.FLAG_LAST
+            self._channel.notify(bytes([flags, self._seq]) + self._frags[self._seq])
+            self._seq += 1
+
+
+class _DeviceSarReceiver:
+    """Device-side SAR receiver behind a mock channel (server_cert)."""
+
+    def __init__(self, channel: _MockChannel, on_data: Callable[[bytes], None],
+                 window: int = 3):
+        self._channel = channel
+        self._on_data = on_data
+        self._window = window
+        self._chunks: list[bytes] = []
+        self._expected = 0
+        self._ended = False
+        channel.on_subscribe = self._open
+        channel.on_write = self._on_write
+
+    def _ack(self, seq: int) -> None:
+        self._channel.notify(bytes([sar.CODE_ACK, seq, self._window]))
+
+    def _open(self) -> None:
+        self._chunks = []
+        self._expected = 0
+        self._ended = False
+        self._ack(0xFF)
+
+    def _on_write(self, pkt: bytes) -> None:
+        flags = pkt[0]
+        if flags & sar.FLAG_FIN:
+            assert self._ended, "FIN before LAST"
+            if pkt[1] == sar.CODE_ACK:
+                self._on_data(b"".join(self._chunks))
+            return
+        seq = pkt[1]
+        assert seq == self._expected, f"mock expects in-order (got {seq})"
+        self._chunks.append(pkt[2:])
+        self._expected = (seq + 1) & 0xFF
+        if flags & sar.FLAG_LAST:
+            self._ended = True
+        self._ack(seq)
+
+
 class MockDeviceTransport(Transport):
-    """Device-side state machine behind two mock channels."""
+    """Device-side state machine behind two mock channels.
+
+    Pass `saead_identity` (a device Identity) to model a saead firmware
+    build: the transport grows the info/server_cert/device_cert TOFU
+    endpoints, stores the pushed server cert, and encrypts the pouch path
+    once the exchange completes — mirroring the firmware, where saead is a
+    compile-time choice.
+    """
 
     def __init__(self, handler: Handler, device_id: str = "mock-dev",
                  window: int = 3, defer_responses: int = 0,
-                 device_saead: "DeviceSaead | None" = None):
+                 device_saead: "DeviceSaead | None" = None,
+                 saead_identity: "certmod.Identity | None" = None,
+                 saead_algorithm: int = saead.ALG_CHACHA20_POLY1305):
         self.downlink = _MockChannel()
         self.uplink = _MockChannel()
         self._handler = handler
@@ -133,6 +224,41 @@ class MockDeviceTransport(Transport):
         self.downlink.on_write = self._dl_write
         self.uplink.on_subscribe = self._ul_open
         self.uplink.on_write = self._ul_write
+
+        self._identity = saead_identity
+        self._saead_algorithm = saead_algorithm
+        self.stored_server_cert: bytes | None = None
+        if saead_identity is not None:
+            self.info = _MockChannel()
+            self.server_cert = _MockChannel()
+            self.device_cert = _MockChannel()
+            _DeviceSarSender(self.info, self._info_payload)
+            _DeviceSarSender(self.device_cert, lambda: saead_identity.cert_der)
+            _DeviceSarReceiver(self.server_cert, self._store_server_cert)
+
+    # -- TOFU endpoints (saead builds) ----------------------------------------
+
+    def _info_payload(self) -> bytes:
+        if self.stored_server_cert is None:
+            serial = b""
+        else:
+            from cryptography import x509
+
+            n = x509.load_der_x509_certificate(self.stored_server_cert).serial_number
+            serial = n.to_bytes((n.bit_length() + 7) // 8 or 1, "big")
+            # mbedtls keeps the DER sign byte; model that worst case.
+            if serial[0] & 0x80:
+                serial = b"\x00" + serial
+        return cbor2.dumps({"flags": 0, "server_cert_snr": serial})
+
+    def _store_server_cert(self, der: bytes) -> None:
+        assert self._identity is not None
+        self.stored_server_cert = der
+        self._saead = DeviceSaead(
+            self._identity.private_key,
+            certmod.device_public_key(der),
+            algorithm=self._saead_algorithm,
+        )
 
     async def connect(self) -> None:
         pass

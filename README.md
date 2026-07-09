@@ -109,7 +109,9 @@ See [`samples/cred_only/`](samples/cred_only/) for a minimal BLE-only target.
 ## Clients
 
 The same wire protocol is spoken by every client, each pinned to the shared
-golden vectors in `tests/vectors/`. See [docs/clients.md](docs/clients.md) for
+golden vectors in `tests/vectors/`. All three speak both pouch framings —
+plaintext and the saead encrypted session (TOFU cert exchange + per-block
+AEAD) — autodetected per device. See [docs/clients.md](docs/clients.md) for
 the full capability parity matrix.
 
 | Client | Language | Location |
@@ -175,10 +177,12 @@ golden-vector conformance suites (the Swift core on both Linux and macOS,
 plus a Simulator build of the iOS app), and a generated-code freshness
 check.
 
-**Note:** the live encrypted BLE round-trip is validated from a phone
-(Android or iPhone) or Linux host — macOS CoreBluetooth cannot complete
-LE Secure-Connections pairing with the ESP32-S3 (details in the protocol
-doc / dev notes).
+For the **live BLE round-trip**, build and flash a provisioning device, then
+drive a client against it — see [docs/hardware-testing.md](docs/hardware-testing.md)
+for the full build/flash/monitor recipe (and the per-board tuning the on-device
+saead crypto needs). The nRF52840 DK pairs with every client including the
+macOS CLI; the ESP32-S3 works except for bonded reconnect on the pinned
+Zephyr ([`west.yml`](west.yml)).
 
 ## License
 

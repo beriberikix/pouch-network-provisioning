@@ -15,6 +15,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -29,9 +30,20 @@ import io.golioth.pouchprov.ble.PouchProvDevice
 fun ScanScreen(vm: ProvViewModel, onScan: () -> Unit) {
     val devices by vm.devices.collectAsState()
     val scanning by vm.scanning.collectAsState()
+    val scanAll by vm.scanAll.collectAsState()
 
     Button(onClick = onScan, enabled = !scanning, modifier = Modifier.fillMaxWidth()) {
         Text(if (scanning) "Scanning…" else "Scan for devices")
+    }
+
+    Row(
+        Modifier.fillMaxWidth().padding(top = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text("Include devices not in provisioning mode",
+             style = MaterialTheme.typography.bodyMedium)
+        Switch(checked = scanAll, onCheckedChange = { vm.setScanAll(it) }, enabled = !scanning)
     }
 
     if (scanning && devices.isEmpty()) {
@@ -54,7 +66,9 @@ fun ScanScreen(vm: ProvViewModel, onScan: () -> Unit) {
         Modifier.fillMaxWidth().padding(top = 12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        items(devices, key = { it.address }) { d -> DeviceRow(d, onClick = { vm.select(d) }) }
+        items(devices, key = { it.address }) { d ->
+            DeviceRow(d, onClick = { if (d.provisioning) vm.select(d) })
+        }
     }
 }
 
@@ -74,6 +88,13 @@ private fun DeviceRow(device: PouchProvDevice, onClick: () -> Unit) {
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(device.address, style = MaterialTheme.typography.bodySmall)
+                if (!device.provisioning) {
+                    Text(
+                        "pouch (not provisioning)",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.secondary,
+                    )
+                }
             }
             Text("${device.rssi} dBm", style = MaterialTheme.typography.bodySmall)
         }

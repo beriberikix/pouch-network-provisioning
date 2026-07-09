@@ -18,6 +18,10 @@ struct ScanScreen: View {
             .buttonStyle(.borderedProminent)
             .disabled(viewModel.scanning)
 
+            Toggle("Include devices not in provisioning mode", isOn: $viewModel.scanAll)
+                .font(.callout)
+                .disabled(viewModel.scanning)
+
             if let error = viewModel.scanError {
                 Text("Scan failed: \(error)")
                     .font(.footnote)
@@ -64,6 +68,11 @@ private struct DeviceRow: View {
                     Text(device.identifier.uuidString)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                    if !device.provisioning {
+                        Text("pouch (not provisioning)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 Spacer()
                 Text("\(device.rssi) dBm")
@@ -75,5 +84,6 @@ private struct DeviceRow: View {
             .clipShape(RoundedRectangle(cornerRadius: 12))
         }
         .buttonStyle(.plain)
+        .disabled(!device.provisioning)
     }
 }

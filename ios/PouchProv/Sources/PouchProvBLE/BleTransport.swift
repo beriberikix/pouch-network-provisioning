@@ -17,6 +17,12 @@ public final class BleTransport: ProvTransport, @unchecked Sendable {
     private let downlinkChannel: BleChannel
     private let uplinkChannel: BleChannel
 
+    // saead-only SAR endpoints, populated after connect (their presence is the
+    // autodetection signal — saead is a compile-time firmware choice).
+    public private(set) var info: (any ProvChannel)?
+    public private(set) var serverCert: (any ProvChannel)?
+    public private(set) var deviceCert: (any ProvChannel)?
+
     init(gatt: GattClient) {
         self.gatt = gatt
         self.downlinkChannel = BleChannel(gatt: gatt, uuid: BleUuids.downlink)
@@ -28,6 +34,11 @@ public final class BleTransport: ProvTransport, @unchecked Sendable {
 
     public func connect() async throws {
         try await gatt.connect()
+        if gatt.hasCharacteristic(BleUuids.serverCert) {
+            info = BleChannel(gatt: gatt, uuid: BleUuids.info)
+            serverCert = BleChannel(gatt: gatt, uuid: BleUuids.serverCert)
+            deviceCert = BleChannel(gatt: gatt, uuid: BleUuids.deviceCert)
+        }
     }
 
     public func disconnect() async {
@@ -38,12 +49,6 @@ public final class BleTransport: ProvTransport, @unchecked Sendable {
     /// payload, capped at the protocol default (ATT MTU 247 => 244).
     public var maxlen: Int {
         min(ProvSession.defaultMaxlen, gatt.maxWriteLength)
-    }
-
-    /// Read the INFO characteristic ({flags, server_cert_snr}), for diagnostics
-    /// and the future saead path.
-    public func readInfo() async throws -> Data {
-        try await gatt.read(BleUuids.info)
     }
 }
 

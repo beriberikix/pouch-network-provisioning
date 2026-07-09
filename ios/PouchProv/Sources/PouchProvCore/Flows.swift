@@ -141,6 +141,29 @@ public enum Flows {
         )
     }
 
+    /// Query per-kind byte counts of credentials the device has received.
+    public static func credStatus(_ session: ProvSession) async throws -> [CredKind: Int] {
+        try Messages.decodeCredStatusRsp(
+            try await session.request(path: Messages.pathCred, message: Messages.encodeCredGetStatus())
+        )
+    }
+
+    /// Reset the device's Wi-Fi state machine without wiping credentials.
+    public static func reset(_ session: ProvSession) async throws {
+        try Messages.decodeCtrlRsp(
+            try await session.request(path: Messages.pathCtrl, message: Messages.encodeCtrl(.reset)),
+            op: .reset
+        )
+    }
+
+    /// Wipe stored Wi-Fi and cloud credentials so the device can be re-provisioned.
+    public static func reprovision(_ session: ProvSession) async throws {
+        try Messages.decodeCtrlRsp(
+            try await session.request(path: Messages.pathCtrl, message: Messages.encodeCtrl(.reprovision)),
+            op: .reprovision
+        )
+    }
+
     public static func endSession(_ session: ProvSession) async throws {
         try Messages.decodeCtrlRsp(
             try await session.request(path: Messages.pathCtrl, message: Messages.encodeCtrl(.end)),

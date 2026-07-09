@@ -7,12 +7,15 @@ import android.annotation.SuppressLint
 import android.bluetooth.BluetoothDevice
 import android.content.Context
 import io.golioth.pouchprov.Auth
+import io.golioth.pouchprov.CredKind
 import io.golioth.pouchprov.Flows
 import io.golioth.pouchprov.Pem
 import io.golioth.pouchprov.ScanEntry
 import io.golioth.pouchprov.VersionInfo
 import io.golioth.pouchprov.WifiStatus
+import io.golioth.pouchprov.saead.Tofu
 import io.golioth.pouchprov.session.ProvSession
+import io.golioth.pouchprov.session.SaeadCrypto
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -29,12 +32,25 @@ class PouchProvDevice internal constructor(
     val device: BluetoothDevice,
     val name: String?,
     val rssi: Int,
+    /** Whether the device advertised the provisioning flag (it may be a plain pouch device). */
+    val provisioning: Boolean = true,
+    /** Pouch protocol version from the advertisement's service data (0 if unknown). */
+    val pouchVersion: Int = 0,
+    /** Pouch GATT transport version from the advertisement's service data (0 if unknown). */
+    val gattVersion: Int = 0,
 ) {
     private val transport = BleTransport(context, device)
     private var session: ProvSession? = null
 
     /** Whether the mutual PoP handshake has already succeeded on this session. */
     private var authorized = false
+
+    /** Whether the open session speaks the encrypted (saead) pouch framing. */
+    var encrypted: Boolean = false
+        private set
+
+    // Fresh per device instance; the device re-learns it via the TOFU exchange.
+    private val serverIdentity by lazy { Tofu.generateServerIdentity() }
 
     private val _state = MutableStateFlow<ProvisionState>(ProvisionState.Idle)
 
@@ -46,11 +62,20 @@ class PouchProvDevice internal constructor(
     private fun requireSession(): ProvSession =
         session ?: throw IllegalStateException("not connected — call connect() first")
 
-    /** Connect, pair/encrypt, discover the pouch service, and open a session. */
+    /** Connect, pair/encrypt, discover the pouch service, and open a session.
+     * On a saead firmware build (autodetected from the GATT service) this runs
+     * the TOFU cert exchange and the session speaks encrypted pouches. */
     suspend fun connect() {
         _state.value = ProvisionState.Connecting
         transport.connect()
-        session = ProvSession(transport)
+        session = if (transport.supportsSaead) {
+            val saead = Tofu.secureSession(transport, serverIdentity, ProvSession.DEFAULT_MAXLEN)
+            encrypted = true
+            ProvSession(transport, crypto = SaeadCrypto(saead))
+        } else {
+            encrypted = false
+            ProvSession(transport)
+        }
         authorized = false
     }
 
@@ -58,6 +83,7 @@ class PouchProvDevice internal constructor(
         transport.disconnect()
         session = null
         authorized = false
+        encrypted = false
     }
 
     /** Remove any stale bond to this device so the next [connect] pairs afresh. */
@@ -83,6 +109,15 @@ class PouchProvDevice internal constructor(
     /** Push device cert + key (+ optional CA) as DER (PEM inputs are accepted). */
     suspend fun provisionCredentials(cert: ByteArray, key: ByteArray, ca: ByteArray? = null) =
         Flows.bootstrapCredentials(requireSession(), Pem.toDer(cert), Pem.toDer(key), ca?.let { Pem.toDer(it) })
+
+    /** Per-kind byte counts of credentials the device has received. */
+    suspend fun credStatus(): Map<CredKind, Int> = Flows.credStatus(requireSession())
+
+    /** Reset the device's Wi-Fi state machine (credentials are kept). */
+    suspend fun reset() = Flows.reset(requireSession())
+
+    /** Wipe stored Wi-Fi and cloud credentials (factory reset provisioning). */
+    suspend fun reprovision() = Flows.reprovision(requireSession())
 
     /** End the session; the device proceeds to normal operation. */
     suspend fun end() = Flows.endSession(requireSession())

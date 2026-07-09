@@ -63,15 +63,30 @@ Runtime permissions the app must request: `BLUETOOTH_SCAN` + `BLUETOOTH_CONNECT`
 
 ## On-device end-to-end
 
-1. Flash `samples/basic` (plaintext build) to an ESP32-S3 / nRF board.
+1. Build and flash a provisioning device following
+   [`docs/hardware-testing.md`](../docs/hardware-testing.md). `samples/cred_only`
+   gives a BLE-only **encrypted (saead)** device; `samples/basic` is plaintext.
+   The client autodetects which.
 2. `./gradlew :app:installDebug` on a connected phone (`adb devices` to confirm).
-3. In the app: Scan → Select the `PVN-…` device → enter the PoP → Provision.
-4. Confirm on the device console it received the `.prov/*` entries and reported
-   `CONNECTED` / stored credentials. The same board is provisionable by
-   `pouchprov` from Linux, demonstrating cross-client interchangeability.
+3. In the app: Scan → Select the `PVN-…` device → accept the pairing prompt →
+   enter the PoP (`abcd1234` for the samples) → for `cred_only`, pick a cert mode
+   (Self-signed is simplest) and Generate → Provision. **Keep the screen awake**
+   — a lock suspends BLE and stalls the final step.
+4. The device card shows `encrypted (saead)` vs `plaintext session`; on success
+   the device console reports `Session authorized` then `cloud device
+   certificate stored`. The same board is provisionable by the CLI and the iOS
+   app, demonstrating cross-client interchangeability.
+
+`app/src/androidTest/.../HardwareProvisioningTest.kt` is an instrumented test of
+this flow against a connected board.
 
 ## Status
 
-Plaintext (`ENCRYPTION_NONE`) path, matching the CLI's live functional level. The
-saead encrypted session is a follow-up behind the `SessionCrypto` seam in
-`pouchprov-core`.
+Feature parity with the CLI. The SDK speaks both pouch framings and autodetects
+per device: plaintext (`ENCRYPTION_NONE`) or the saead encrypted session (TOFU
+cert exchange + ECDH/HKDF/per-block AEAD), surfaced as
+`PouchProvDevice.encrypted`. ChaCha20-Poly1305 uses Bouncy Castle's lightweight
+API (the JCA cipher needs Android API 28+, and Android's preinstalled BC
+provider is crippled); AES-GCM and ECDH use the platform JCA. SDK verbs also
+cover `credStatus()`, `reset()`, `reprovision()`, and scan-all discovery; the
+app adds Golioth / self-signed / upload credential modes and device controls.

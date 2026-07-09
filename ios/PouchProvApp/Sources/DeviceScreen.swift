@@ -39,7 +39,7 @@ struct DeviceScreen: View {
                         viewModel.select(device)
                     }
                 } else if let info = viewModel.version {
-                    DeviceInfoCard(info: info)
+                    DeviceInfoCard(info: info, encrypted: viewModel.sessionEncrypted)
                     if viewModel.provisioning {
                         ProvisionProgress(
                             state: viewModel.provisionState,
@@ -114,12 +114,14 @@ private struct ConnectErrorCard: View {
 
 private struct DeviceInfoCard: View {
     let info: VersionInfo
+    let encrypted: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Device")
                 .font(.headline)
-            Text("protocol v\(info.proto) · lib \(info.lib) · block \(info.blockSize) B")
+            Text("protocol v\(info.proto) · lib \(info.lib) · block \(info.blockSize) B · "
+                + (encrypted ? "encrypted (saead)" : "plaintext session"))
                 .font(.footnote)
                 .foregroundStyle(.secondary)
             HStack(spacing: 8) {
@@ -296,6 +298,8 @@ private struct ProvisionForm: View {
             }
             .buttonStyle(.borderedProminent)
             .padding(.top, 16)
+
+            DeviceControls(viewModel: viewModel, pop: pop)
         }
         .padding(.top, 12)
         .onAppear {
@@ -332,7 +336,7 @@ private struct SsidPicker: View {
         Menu {
             ForEach(Array(networks.enumerated()), id: \.offset) { _, entry in
                 let name = String(decoding: entry.ssid, as: UTF8.self)
-                Button(name.isEmpty ? "(hidden)" : "\(name)   \(entry.rssi) dBm") {
+                Button(name.isEmpty ? "(hidden)" : "\(name)   \(entry.rssi) dBm   \(entry.authName)") {
                     onSelect(name)
                 }
             }
@@ -404,6 +408,57 @@ private struct ProvisionProgress: View {
             return "Configuring Wi-Fi…"
         case .finishing: return "Finishing…"
         default: return "Working…"
+        }
+    }
+}
+
+private struct DeviceControls: View {
+    @ObservedObject var viewModel: AppViewModel
+    let pop: String
+
+    @State private var confirmReprovision = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SectionTitle("Device controls")
+            HStack(spacing: 8) {
+                Button("Reset Wi-Fi") {
+                    viewModel.deviceControl(pop: pop, reprovision: false)
+                }
+                .buttonStyle(.bordered)
+                .disabled(viewModel.ctrlBusy)
+
+                Button("Factory reset") {
+                    confirmReprovision = true
+                }
+                .buttonStyle(.bordered)
+                .disabled(viewModel.ctrlBusy)
+
+                if viewModel.ctrlBusy {
+                    ProgressView()
+                }
+            }
+            if let done = viewModel.ctrlDone {
+                Text(done)
+                    .font(.footnote)
+            }
+            if let error = viewModel.ctrlError {
+                Text("Error: \(error)")
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+            }
+        }
+        .confirmationDialog(
+            "Factory reset provisioning?",
+            isPresented: $confirmReprovision,
+            titleVisibility: .visible
+        ) {
+            Button("Wipe all credentials", role: .destructive) {
+                viewModel.deviceControl(pop: pop, reprovision: true)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This wipes ALL stored Wi-Fi and cloud credentials on the device.")
         }
     }
 }

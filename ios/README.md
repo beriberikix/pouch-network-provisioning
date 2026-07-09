@@ -69,15 +69,25 @@ The app must declare `NSBluetoothAlwaysUsageDescription` in its Info.plist
 
 ## On-device end-to-end
 
-1. Flash `samples/basic` (plaintext build) to an ESP32-S3 / nRF board.
+1. Build and flash a provisioning device following
+   [`docs/hardware-testing.md`](../docs/hardware-testing.md). `samples/cred_only`
+   gives a BLE-only **encrypted (saead)** device; `samples/basic` is plaintext.
+   The client autodetects which.
 2. Generate the project (`xcodegen generate`), open it in Xcode, set your
-   signing team, and run on a connected iPhone.
+   signing team, and run on a connected iPhone (the Simulator has no Bluetooth).
+   From the command line: `xcodebuild -project PouchProvApp.xcodeproj -scheme
+   PouchProvApp -destination 'platform=iOS,id=<UDID>' -allowProvisioningUpdates
+   DEVELOPMENT_TEAM=<TEAM> build`, then install with
+   [`ios-deploy`](https://github.com/ios-control/ios-deploy) (`xcrun devicectl`
+   does not support iOS 16).
 3. In the app: Scan → Select the `PVN-…` device → accept the pairing prompt →
-   enter the PoP → Provision.
-4. Confirm on the device console it received the `.prov/*` entries and reported
-   `CONNECTED` / stored credentials. The same board is provisionable by
-   `pouchprov` from Linux and by the Android app, demonstrating cross-client
-   interchangeability.
+   enter the PoP (`abcd1234` for the samples) → for `cred_only`, pick a cert mode
+   (Self-signed is simplest) and Generate → Provision. **Keep the screen awake**
+   — a lock suspends BLE and stalls the final step.
+4. The device card shows `encrypted (saead)` vs `plaintext session`; on success
+   the device console reports `Session authorized` then `cloud device
+   certificate stored`. The same board is provisionable by the CLI and the
+   Android app, demonstrating cross-client interchangeability.
 
 ## Platform parity notes
 
@@ -94,11 +104,15 @@ The app must declare `NSBluetoothAlwaysUsageDescription` in its Info.plist
 
 ## Status
 
-Plaintext (`ENCRYPTION_NONE`) path, matching the CLI's live functional level and
-the Android SDK. Follow-ups, tracked at parity with Android:
+Feature parity with the CLI and the Android SDK. The SDK speaks both pouch
+framings and autodetects per device: plaintext (`ENCRYPTION_NONE`) or the saead
+encrypted session (TOFU cert exchange + ECDH/HKDF/per-block AEAD on
+swift-crypto), surfaced as `PouchProvDevice.encrypted`. SDK verbs also cover
+`credStatus()`, `reset()`, `reprovision()`, and scan-all discovery; the app adds
+Golioth / self-signed / upload credential modes and device controls.
 
-- saead encrypted session behind the `SessionCrypto` seam in `PouchProvCore`
-  (the Python `pouchlink/saead.py` is the reference).
+Remaining follow-ups:
+
 - Swift 6 strict-concurrency language mode (the package builds in `.v5` mode
   today; the CoreBluetooth delegate bridge needs a Sendable audit first).
 - An on-device XCUITest analogue of Android's `HardwareProvisioningTest`.

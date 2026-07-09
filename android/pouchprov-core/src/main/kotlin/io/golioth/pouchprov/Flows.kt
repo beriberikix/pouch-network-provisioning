@@ -107,6 +107,28 @@ object Flows {
         Messages.decodeCredFinalizeRsp(session.request(Messages.PATH_CRED, Messages.encodeCredFinalize()))
     }
 
+    /** Query per-kind byte counts of credentials the device has received. */
+    suspend fun credStatus(session: ProvSession): Map<CredKind, Int> =
+        Messages.decodeCredStatusRsp(
+            session.request(Messages.PATH_CRED, Messages.encodeCredGetStatus()),
+        )
+
+    /** Reset the device's Wi-Fi state machine without wiping credentials. */
+    suspend fun reset(session: ProvSession) {
+        Messages.decodeCtrlRsp(
+            session.request(Messages.PATH_CTRL, Messages.encodeCtrl(CtrlOp.RESET)),
+            CtrlOp.RESET,
+        )
+    }
+
+    /** Wipe stored Wi-Fi and cloud credentials so the device can be re-provisioned. */
+    suspend fun reprovision(session: ProvSession) {
+        Messages.decodeCtrlRsp(
+            session.request(Messages.PATH_CTRL, Messages.encodeCtrl(CtrlOp.REPROVISION)),
+            CtrlOp.REPROVISION,
+        )
+    }
+
     suspend fun endSession(session: ProvSession) {
         Messages.decodeCtrlRsp(
             session.request(Messages.PATH_CTRL, Messages.encodeCtrl(CtrlOp.END)),

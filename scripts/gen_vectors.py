@@ -18,8 +18,10 @@ import cbor2
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "cli" / "src"))
 
+from cryptography.hazmat.primitives.asymmetric import ec  # noqa: E402
+
 from pouchprov import codec  # noqa: E402
-from pouchprov.pouchlink import pouch  # noqa: E402
+from pouchprov.pouchlink import pouch, saead  # noqa: E402
 
 VECTOR_DIR = Path(__file__).parent.parent / "tests" / "vectors"
 
@@ -119,9 +121,91 @@ def pouch_frames() -> dict:
              "two_blocks": multiblock, "empty": empty}.items()}
 
 
+def saead_kdf() -> dict:
+    """Deterministic saead vectors: fixed P-256 scalars -> INFO string, derived
+    key, and a two-block seal chain per algorithm/direction. Everything derives
+    from fixed inputs, so regeneration is byte-stable. These pin the Kotlin and
+    Swift saead ports to the Python reference (cli/src/pouchprov/pouchlink/saead.py)."""
+    server_scalar = int.from_bytes(bytes(range(1, 33)), "big")   # 0x0102...20
+    device_scalar = int.from_bytes(bytes(range(33, 65)), "big")  # 0x2122...40
+    server_key = ec.derive_private_key(server_scalar, ec.SECP256R1())
+    device_key = ec.derive_private_key(device_scalar, ec.SECP256R1())
+
+    def uncompressed(key: ec.EllipticCurvePrivateKey) -> bytes:
+        from cryptography.hazmat.primitives import serialization
+
+        return key.public_key().public_bytes(
+            serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint
+        )
+
+    block_log = 9
+    pouch_id = 0
+    plaintexts = [
+        bytes([pouch.BLOCK_ID_ENTRY | pouch.BLOCK_FIRST]) + b"saead vector block 0",
+        bytes([pouch.BLOCK_ID_ENTRY | pouch.BLOCK_LAST]) + b"and block 1",
+    ]
+
+    def info_string(initiator: int, session_id: bytes, algorithm: int) -> str:
+        import base64
+
+        return "E0:{d}:{sid}:C{alg}R:{log:02X}".format(
+            d="D" if initiator == saead.ROLE_DEVICE else "S",
+            sid=base64.b64encode(session_id).decode(),
+            alg="C" if algorithm == saead.ALG_CHACHA20_POLY1305 else "A",
+            log=block_log,
+        )
+
+    def case(algorithm: int, initiator: int, session_id: bytes) -> dict:
+        # Both sides derive the same key from mirrored ECDH inputs.
+        key = saead.derive_session_key(
+            server_key, device_key.public_key(), session_id, initiator, algorithm, block_log
+        )
+        sender_role = initiator  # blocks in these vectors are sealed by the initiator
+        blocks = []
+        prev_tag = b""
+        for index, plaintext in enumerate(plaintexts):
+            nonce = saead._nonce(pouch_id, index, sender_role)
+            aad = prev_tag if index > 0 else b""
+            sealed = saead._aead(algorithm, key).encrypt(nonce, plaintext, aad)
+            blocks.append({
+                "index": index,
+                "plaintext": plaintext.hex(),
+                "nonce": nonce.hex(),
+                "aad": aad.hex(),
+                "sealed": sealed.hex(),
+            })
+            prev_tag = sealed[-saead.AUTH_TAG_LEN:]
+        return {
+            "algorithm": algorithm,
+            "initiator": initiator,
+            "session_id": session_id.hex(),
+            "info": info_string(initiator, session_id, algorithm),
+            "key": key.hex(),
+            "blocks": blocks,
+        }
+
+    downlink_sid = bytes(range(16))       # 000102...0f
+    uplink_sid = bytes(range(16, 32))     # 101112...1f
+    return {
+        "server_private": server_scalar.to_bytes(32, "big").hex(),
+        "device_private": device_scalar.to_bytes(32, "big").hex(),
+        "server_public_uncompressed": uncompressed(server_key).hex(),
+        "device_public_uncompressed": uncompressed(device_key).hex(),
+        "block_log": block_log,
+        "pouch_id": pouch_id,
+        "cases": {
+            "chacha_downlink": case(saead.ALG_CHACHA20_POLY1305, saead.ROLE_SERVER, downlink_sid),
+            "aes_downlink": case(saead.ALG_AES_GCM, saead.ROLE_SERVER, downlink_sid),
+            "chacha_uplink": case(saead.ALG_CHACHA20_POLY1305, saead.ROLE_DEVICE, uplink_sid),
+            "aes_uplink": case(saead.ALG_AES_GCM, saead.ROLE_DEVICE, uplink_sid),
+        },
+    }
+
+
 def main() -> None:
     VECTOR_DIR.mkdir(parents=True, exist_ok=True)
-    for name, data in (("prov_messages", prov_messages()), ("pouch_frames", pouch_frames())):
+    for name, data in (("prov_messages", prov_messages()), ("pouch_frames", pouch_frames()),
+                       ("saead_kdf", saead_kdf())):
         path = VECTOR_DIR / f"{name}.json"
         path.write_text(json.dumps(data, indent=2) + "\n")
         print(f"wrote {path}")

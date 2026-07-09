@@ -36,8 +36,12 @@ class PouchProvManager(private val context: Context) {
      * Scan for devices advertising the pouch service with the provisioning flag
      * set. Emits a [PouchProvDevice] the first time each device is seen. The flow
      * runs until cancelled or [timeoutMs] elapses.
+     *
+     * With [includeAll], pouch devices *not* in provisioning mode are emitted too
+     * (mirrors the CLI's `discover --all`); check [PouchProvDevice.provisioning]
+     * before connecting.
      */
-    fun scan(timeoutMs: Long = 10_000): Flow<PouchProvDevice> = callbackFlow {
+    fun scan(timeoutMs: Long = 10_000, includeAll: Boolean = false): Flow<PouchProvDevice> = callbackFlow {
         val scanner = adapter?.bluetoothLeScanner ?: throw BleError("Bluetooth is off or unavailable")
         val seen = HashSet<String>()
 
@@ -46,8 +50,10 @@ class PouchProvManager(private val context: Context) {
                 val record = result.scanRecord ?: return
                 val serviceData = record.getServiceData(BleUuids.SERVICE_UUID16) ?: return
                 if (serviceData.size < 2) return
+                val version = serviceData[0].toInt() and 0xFF
                 val flags = serviceData[1].toInt() and 0xFF
-                if (flags and BleUuids.ADV_FLAG_PROVISIONING == 0) return
+                val provisioning = flags and BleUuids.ADV_FLAG_PROVISIONING != 0
+                if (!includeAll && !provisioning) return
                 if (!seen.add(result.device.address)) return
                 trySend(
                     PouchProvDevice(
@@ -55,6 +61,9 @@ class PouchProvManager(private val context: Context) {
                         device = result.device,
                         name = record.deviceName ?: result.device.name,
                         rssi = result.rssi,
+                        provisioning = provisioning,
+                        pouchVersion = version shr 4,
+                        gattVersion = version and 0x0F,
                     ),
                 )
             }

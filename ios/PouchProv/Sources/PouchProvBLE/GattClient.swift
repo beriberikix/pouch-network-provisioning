@@ -293,6 +293,11 @@ final class GattClient: NSObject, CBPeripheralDelegate, @unchecked Sendable {
 
     // MARK: - operations
 
+    /// Whether the discovered services expose `uuid` (call after connect).
+    func hasCharacteristic(_ uuid: CBUUID) -> Bool {
+        (try? characteristic(uuid)) != nil
+    }
+
     private func characteristic(_ uuid: CBUUID) throws -> CBCharacteristic {
         for service in peripheral.services ?? [] {
             if let characteristic = service.characteristics?.first(where: { $0.uuid == uuid }) {

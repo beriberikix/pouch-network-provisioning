@@ -4,7 +4,9 @@
 package io.golioth.pouchprov
 
 import io.golioth.pouchprov.cbor.Cbor
+import io.golioth.pouchprov.saead.Tofu
 import io.golioth.pouchprov.session.ProvSession
+import io.golioth.pouchprov.session.SaeadCrypto
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -71,6 +73,62 @@ class FlowsMockTest {
         assertTrue(device.ended)
     }
 
+    @Test fun ctrlOpsAndCredStatus() = runBlocking {
+        val device = DeviceSim(pop = pop, caps = listOf("wifi", "scan", "cred", "auth"))
+        val session = ProvSession(MockDeviceTransport(device::handle))
+
+        val info = Flows.getVersion(session)
+        Flows.authorizeIfNeeded(session, info, pop)
+
+        Flows.bootstrapCredentials(session, certDer = ByteArray(500) { 1 }, keyDer = ByteArray(120) { 2 })
+        val before = Flows.credStatus(session)
+        assertEquals(mapOf(CredKind.DEVICE_CERT to 500, CredKind.PRIVATE_KEY to 120), before)
+
+        Flows.reset(session)
+        assertTrue(device.wifiReset)
+
+        Flows.reprovision(session)
+        assertTrue(device.reprovisioned)
+        assertEquals(emptyMap<CredKind, Int>(), Flows.credStatus(session))
+    }
+
+    @Test fun saeadSecureProvisionEndToEnd() = runBlocking {
+        val identity = Tofu.generateServerIdentity("mock-device")
+        val device = DeviceSim(pop = pop, caps = listOf("cred", "auth"))
+        val transport = MockDeviceTransport(device::handle, saeadIdentity = identity)
+        assertTrue(transport.supportsSaead)
+
+        // Autodetect -> TOFU -> encrypted session, as PouchProvDevice.connect does.
+        val client = Tofu.generateServerIdentity("client")
+        val saead = Tofu.secureSession(transport, client, maxlen = 244)
+        assertArrayEquals(client.certDer, transport.storedServerCert)
+
+        val session = ProvSession(transport, crypto = SaeadCrypto(saead))
+        val info = Flows.getVersion(session)
+        assertEquals(1, info.proto)
+        Flows.authorizeIfNeeded(session, info, pop)
+        Flows.bootstrapCredentials(session, certDer = ByteArray(300) { 1 }, keyDer = ByteArray(120) { 2 })
+        assertEquals(300, device.credLen(CredKind.DEVICE_CERT))
+        assertTrue(device.credFinalized)
+        Flows.endSession(session)
+        assertTrue(device.ended)
+    }
+
+    @Test fun saeadSecondExchangeSkipsPush() = runBlocking {
+        val identity = Tofu.generateServerIdentity("mock-device")
+        val transport = MockDeviceTransport({ _, _ -> null }, saeadIdentity = identity)
+        val client = Tofu.generateServerIdentity("client")
+
+        val dev1 = Tofu.exchangeCerts(transport, client, maxlen = 244)
+        assertArrayEquals(identity.certDer, dev1)
+        val stored = transport.storedServerCert!!
+
+        // Same identity again: serials match, nothing re-pushed.
+        val dev2 = Tofu.exchangeCerts(transport, client, maxlen = 244)
+        assertArrayEquals(identity.certDer, dev2)
+        assertTrue(stored === transport.storedServerCert)
+    }
+
     @Test fun wrongPopFailsBeforeSendingClientProof() = runBlocking {
         val device = DeviceSim(pop = "correct", caps = listOf("cred", "auth"))
         val session = ProvSession(MockDeviceTransport(device::handle))
@@ -91,6 +149,8 @@ private class DeviceSim(val pop: String, val caps: List<String>) {
     var wifiSsid: ByteArray? = null
     var credFinalized = false
     var ended = false
+    var wifiReset = false
+    var reprovisioned = false
     private val creds = HashMap<CredKind, Int>()
     private val devNonce = ByteArray(16) { (0x40 + it).toByte() }
 
@@ -154,7 +214,14 @@ private class DeviceSim(val pop: String, val caps: List<String>) {
                 1 -> { credFinalized = true; Cbor.encode(listOf(1L, 0L)) }
                 else -> Cbor.encode(listOf(2L, 0L, creds.entries.associate { it.key.code.toString() to it.value.toLong() }))
             }
-            Messages.PATH_CTRL -> { if (op == CtrlOp.END.code) ended = true; Cbor.encode(listOf(op.toLong(), 0L)) }
+            Messages.PATH_CTRL -> {
+                when (op) {
+                    CtrlOp.END.code -> ended = true
+                    CtrlOp.RESET.code -> wifiReset = true
+                    CtrlOp.REPROVISION.code -> { reprovisioned = true; creds.clear() }
+                }
+                Cbor.encode(listOf(op.toLong(), 0L))
+            }
             else -> null
         }
     }

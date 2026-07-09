@@ -28,7 +28,10 @@ success.
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
+
+logger = logging.getLogger(__name__)
 
 FLAG_FIRST = 0x01
 FLAG_LAST = 0x02
@@ -82,7 +85,14 @@ class SarSender:
 
             if sent_last:
                 if ack_seq == (seq - 1) & SEQ_MASK:
-                    await self._write(bytes([FLAG_FIN, CODE_ACK]))
+                    # All fragments are acked — the blob is delivered. The FIN is
+                    # only a courtesy close; the device may already have torn the
+                    # endpoint down (ATT 0x0E) or dropped the link, so it is
+                    # best-effort, matching the Android/iOS transports.
+                    try:
+                        await self._write(bytes([FLAG_FIN, CODE_ACK]))
+                    except Exception as exc:  # noqa: BLE001 — close is best-effort
+                        logger.debug("FIN write failed (transfer already delivered): %s", exc)
                     return
                 continue  # stale ack; wait for the ack of the LAST fragment
 
