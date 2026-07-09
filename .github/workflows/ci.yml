@@ -6,6 +6,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   ztest:
@@ -170,6 +171,56 @@ jobs:
           path: |
             android/pouchprov-core/build/reports/tests/**
             android/pouchprov-ble/build/reports/lint-results-debug.*
+          if-no-files-found: ignore
+
+  swift-core:
+    name: Swift core tests (Linux)
+    runs-on: ubuntu-latest
+    container: swift:6.1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Core conformance tests (golden vectors, platform-independent)
+        # Reads the shared tests/vectors/*.json — the same fixtures the CLI,
+        # the Kotlin SDK and the device codec are pinned to.
+        working-directory: ios/PouchProv
+        run: swift test
+
+  ios:
+    name: iOS (core tests + app build)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain versions
+        run: |
+          xcodebuild -version
+          swift --version
+      - name: Core conformance tests (golden vectors, pure Swift)
+        working-directory: ios/PouchProv
+        run: |
+          set -o pipefail
+          swift test 2>&1 | tee swift-test.log
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate the app project
+        working-directory: ios/PouchProvApp
+        run: xcodegen generate
+      - name: Build the app (Simulator, no signing)
+        working-directory: ios/PouchProvApp
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project PouchProvApp.xcodeproj -scheme PouchProvApp \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            2>&1 | tee xcodebuild.log
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-logs
+          path: |
+            ios/PouchProv/swift-test.log
+            ios/PouchProvApp/xcodebuild.log
           if-no-files-found: ignore
 
   codegen:

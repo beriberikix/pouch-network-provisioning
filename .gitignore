@@ -8,3 +8,8 @@ twister-out*/
 
 # HAR captures may contain auth tokens/cookies — never commit
 *.har
+
+# Swift / Xcode (ios/)
+ios/PouchProv/.build/
+ios/PouchProvApp/*.xcodeproj
+ios/**/DerivedData/

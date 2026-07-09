@@ -1,0 +1,39 @@
+# Copyright (c) 2026 Jonathan Beri
+# SPDX-License-Identifier: Apache-2.0
+#
+# XcodeGen project spec for the reference iOS app. The .xcodeproj is generated
+# (never committed): `xcodegen generate` here, then open PouchProvApp.xcodeproj.
+name: PouchProvApp
+options:
+  bundleIdPrefix: io.golioth
+  deploymentTarget:
+    iOS: "16.0"
+  xcodeVersion: "16.0"
+packages:
+  PouchProv:
+    path: ../PouchProv
+targets:
+  PouchProvApp:
+    type: application
+    platform: iOS
+    sources: [Sources]
+    dependencies:
+      - package: PouchProv
+        product: PouchProvBLE
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: Pouch Provisioning
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        UILaunchScreen: {}
+        NSBluetoothAlwaysUsageDescription: >-
+          Bluetooth is used to discover and provision nearby pouch devices.
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.golioth.pouchprov.app
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1"
+    # An explicit scheme is required for `xcodebuild -scheme` on a generated
+    # project (Xcode only auto-creates schemes interactively).
+    scheme: {}

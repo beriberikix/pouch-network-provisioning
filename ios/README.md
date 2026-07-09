@@ -1,0 +1,104 @@
+<!-- Copyright (c) 2026 Jonathan Beri; SPDX-License-Identifier: Apache-2.0 -->
+# Pouch provisioning — iOS
+
+Native Swift SDK and a SwiftUI reference app for provisioning blank Zephyr
+devices over BLE with the [pouch](https://github.com/golioth/pouch) protocol.
+This is the iOS sibling of the Kotlin [`android/`](../android/) SDK and the
+Python [`cli/`](../cli/); all three speak the same wire protocol (see
+[`docs/clients.md`](../docs/clients.md)).
+
+## Modules
+
+| Module | Type | What |
+|---|---|---|
+| `PouchProv/Sources/PouchProvCore` | SPM library | Protocol: CBOR codec, pouch framing, SAR, PoP auth, lockstep session, flows, X.509 device certs. No CoreBluetooth — builds and tests on **Linux and macOS** against the shared golden vectors. |
+| `PouchProv/Sources/PouchProvBLE` | SPM library | CoreBluetooth transport (scan, GATT, pairing, notifications) + the public API: `PouchProvManager`, `PouchProvDevice`. |
+| `PouchProvApp` | iOS app | SwiftUI reference UI: scan → select → enter PoP / Wi-Fi / pick or mint certs → provision with live status. Project generated with XcodeGen. |
+
+Dependencies: [swift-crypto](https://github.com/apple/swift-crypto) (HMAC, P-256)
+and [swift-certificates](https://github.com/apple/swift-certificates) (X.509).
+The CBOR codec is hand-rolled to stay byte-identical to the golden vectors
+(insertion-ordered map keys, minimal-length heads).
+
+## Prerequisites
+
+- **Xcode 16+** (Swift 6 toolchain; the package builds in Swift 5 language mode).
+- **[XcodeGen](https://github.com/yonaskolb/XcodeGen)** (`brew install xcodegen`)
+  to generate the app's `.xcodeproj` — the project file is not committed.
+- For SDK-only work, any **Swift 6.x toolchain** (macOS or Linux) is enough.
+- For on-device testing: a **physical iPhone** (the Simulator has no Bluetooth),
+  plus a device running the `samples/basic` target. An iPhone can complete the
+  LE Secure-Connections pairing that **macOS cannot** — target iOS hardware,
+  not Catalyst/macOS, for live end-to-end runs.
+
+## Build & test
+
+```console
+$ cd ios/PouchProv
+$ swift test                        # protocol conformance (no hardware)
+
+$ cd ../PouchProvApp
+$ xcodegen generate                 # emits PouchProvApp.xcodeproj
+$ open PouchProvApp.xcodeproj       # build & run on an iPhone from Xcode
+```
+
+`swift test` reads the shared fixtures in `../../tests/vectors/` (found by
+walking up from the checkout; override with `POUCHPROV_VECTORS_DIR`) and
+verifies every request encoder / pouch frame byte-for-byte, plus SAR loopback,
+full mock-transport Wi-Fi and cred-only flows, and certificate generation.
+
+## Using the SDK
+
+```swift
+import PouchProvBLE
+
+let manager = PouchProvManager()          // triggers the Bluetooth permission prompt
+for try await device in manager.scan() {  // discover a provisioning device
+    let result = try await device.provision(ProvisionRequest(
+        pop: "abcd1234",
+        ssid: "MyNet", password: "hunter22",       // omit for a BLE-only device
+        certificate: certData, privateKey: keyData // PEM or DER
+    ))
+    break
+}
+// Observe device.statePublisher (Combine) to drive a UI with ProvisionState.
+```
+
+The app must declare `NSBluetoothAlwaysUsageDescription` in its Info.plist
+(the reference app's `project.yml` shows this).
+
+## On-device end-to-end
+
+1. Flash `samples/basic` (plaintext build) to an ESP32-S3 / nRF board.
+2. Generate the project (`xcodegen generate`), open it in Xcode, set your
+   signing team, and run on a connected iPhone.
+3. In the app: Scan → Select the `PVN-…` device → accept the pairing prompt →
+   enter the PoP → Provision.
+4. Confirm on the device console it received the `.prov/*` entries and reported
+   `CONNECTED` / stored credentials. The same board is provisionable by
+   `pouchprov` from Linux and by the Android app, demonstrating cross-client
+   interchangeability.
+
+## Platform parity notes
+
+- Devices are identified by CoreBluetooth's per-device `UUID`
+  (`PouchProvDevice.identifier`) — iOS does not expose MAC addresses.
+- There is no `forgetBond()`: iOS has no API to remove a bond. To re-pair from
+  scratch, forget the device in **Settings → Bluetooth**.
+- iOS pairs lazily on the first protected GATT operation (no `createBond`);
+  the SDK gives the first notification-enable a long timeout so the system
+  pairing dialog can be accepted.
+- No MTU request API: the SAR packet size derives from
+  `maximumWriteValueLength(for: .withoutResponse)`, capped at the protocol's
+  244-byte default.
+
+## Status
+
+Plaintext (`ENCRYPTION_NONE`) path, matching the CLI's live functional level and
+the Android SDK. Follow-ups, tracked at parity with Android:
+
+- saead encrypted session behind the `SessionCrypto` seam in `PouchProvCore`
+  (the Python `pouchlink/saead.py` is the reference).
+- Swift 6 strict-concurrency language mode (the package builds in `.v5` mode
+  today; the CoreBluetooth delegate bridge needs a Sendable audit first).
+- An on-device XCUITest analogue of Android's `HardwareProvisioningTest`.

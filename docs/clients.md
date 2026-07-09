@@ -9,7 +9,7 @@ every client speaks it identically and is pinned to the same golden vectors in
 |---|---|---|---|
 | CLI | Python | [`cli/`](../cli/) | Reference client |
 | Android SDK + app | Kotlin | [`android/`](../android/) | Plaintext path; saead is a follow-up |
-| iOS SDK + app | Swift | `ios/` | Planned |
+| iOS SDK + app | Swift | [`ios/`](../ios/) | Plaintext path; saead is a follow-up |
 
 All three target the same functional level: discover a provisioning device,
 read its version/capabilities, authorize with a proof-of-possession, push cloud
@@ -21,14 +21,19 @@ certificates alone.
 
 | Capability | Python CLI | Android (Kotlin) | iOS (Swift) |
 |---|---|---|---|
-| Discover devices | `pouchprov discover` | `PouchProvManager.scan()` | _TBD_ |
-| Read version/caps | `pouchprov version` | `PouchProvDevice.version()` | _TBD_ |
-| Scan Wi-Fi (device) | `pouchprov wifi-scan` | `PouchProvDevice.scanWifi()` | _TBD_ |
-| Authorize (PoP) | `--pop` on any command | `PouchProvDevice.authorize(pop)` | _TBD_ |
-| Provision Wi-Fi | `provision --ssid --password` | `PouchProvDevice.provisionWifi(ssid, password)` | _TBD_ |
-| Provision credentials | `provision --cert --key [--ca]` | `PouchProvDevice.provisionCredentials(cert, key, ca)` | _TBD_ |
-| One-shot provision | `pouchprov provision …` | `PouchProvDevice.provision(ProvisionRequest(…))` | _TBD_ |
-| End session | (implicit at end of `provision`) | `PouchProvDevice.end()` | _TBD_ |
+| Discover devices | `pouchprov discover` | `PouchProvManager.scan()` | `PouchProvManager.scan()` |
+| Read version/caps | `pouchprov version` | `PouchProvDevice.version()` | `PouchProvDevice.version()` |
+| Scan Wi-Fi (device) | `pouchprov wifi-scan` | `PouchProvDevice.scanWifi()` | `PouchProvDevice.scanWifi()` |
+| Authorize (PoP) | `--pop` on any command | `PouchProvDevice.authorize(pop)` | `PouchProvDevice.authorize(pop:)` |
+| Provision Wi-Fi | `provision --ssid --password` | `PouchProvDevice.provisionWifi(ssid, password)` | `PouchProvDevice.provisionWifi(ssid:password:)` |
+| Provision credentials | `provision --cert --key [--ca]` | `PouchProvDevice.provisionCredentials(cert, key, ca)` | `PouchProvDevice.provisionCredentials(cert:key:ca:)` |
+| One-shot provision | `pouchprov provision …` | `PouchProvDevice.provision(ProvisionRequest(…))` | `PouchProvDevice.provision(ProvisionRequest(…))` |
+| End session | (implicit at end of `provision`) | `PouchProvDevice.end()` | `PouchProvDevice.end()` |
+
+iOS parity gaps (platform limitations, not protocol ones): devices are
+identified by CoreBluetooth's per-device `UUID` rather than a MAC address,
+and there is no `forgetBond()` — iOS offers no API to remove a bond, so
+re-pairing from scratch means forgetting the device in Settings → Bluetooth.
 
 ### Equivalent one-shot invocations
 
@@ -65,6 +70,22 @@ $ pouchprov provision --pop abcd1234 --cert device.crt.pem --key device.key.pem
 device.provision(ProvisionRequest(pop = "abcd1234", certificate = cert, privateKey = key))
 ```
 
+The Swift API is the same shape:
+
+```swift
+// iOS (Swift)
+for try await device in manager.scan() {           // discover
+    let result = try await device.provision(ProvisionRequest(
+        pop: "abcd1234",
+        ssid: "MyNet",                              // omit for a BLE-only device
+        password: "hunter22",
+        certificate: certPemData,                   // PEM or DER
+        privateKey: keyPemData
+    ))
+    break
+}
+```
+
 To mint temporary test credentials automatically (instead of supplying your own
 `--cert`/`--key`), see [`docs/golioth-demo-certs.md`](golioth-demo-certs.md) —
 the Golioth public-API flow the console's "temporary certificate" button uses,
@@ -77,7 +98,7 @@ Each client's protocol layer is validated byte-for-byte against
 
 - **Python:** `cd cli && pytest`
 - **Android:** `cd android && ./gradlew :pouchprov-core:test`
-- **iOS:** _planned_
+- **iOS:** `cd ios/PouchProv && swift test` (also runs on Linux)
 
 Because all clients pin to the same fixtures, a message that encodes correctly in
 one client encodes identically in the others and interoperates with the Zephyr
@@ -85,8 +106,8 @@ device codec generated from `cddl/prov.cddl`.
 
 ## Encryption note
 
-Today the Android SDK (like the CLI's live path) speaks the **plaintext**
+Today the Android and iOS SDKs (like the CLI's live path) speak the **plaintext**
 (`ENCRYPTION_NONE`) pouch framing, verifiable end-to-end against `samples/basic`.
-The session layer is built behind a `SessionCrypto` seam so the saead encrypted
+Both session layers are built behind a `SessionCrypto` seam so the saead encrypted
 path (ECDH + HKDF + per-block AEAD) can be added without reshaping the public API.
 See `docs/protocol.md` for the saead details.
