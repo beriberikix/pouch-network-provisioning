@@ -63,13 +63,22 @@ Runtime permissions the app must request: `BLUETOOTH_SCAN` + `BLUETOOTH_CONNECT`
 
 ## On-device end-to-end
 
-1. Flash `samples/basic` (plaintext) or `samples/basic` + `saead.conf`
-   (encrypted) to an ESP32-S3 / nRF board — the client autodetects which.
+1. Build and flash a provisioning device following
+   [`docs/hardware-testing.md`](../docs/hardware-testing.md). `samples/cred_only`
+   gives a BLE-only **encrypted (saead)** device; `samples/basic` is plaintext.
+   The client autodetects which.
 2. `./gradlew :app:installDebug` on a connected phone (`adb devices` to confirm).
-3. In the app: Scan → Select the `PVN-…` device → enter the PoP → Provision.
-4. Confirm on the device console it received the `.prov/*` entries and reported
-   `CONNECTED` / stored credentials. The same board is provisionable by
-   `pouchprov` from Linux, demonstrating cross-client interchangeability.
+3. In the app: Scan → Select the `PVN-…` device → accept the pairing prompt →
+   enter the PoP (`abcd1234` for the samples) → for `cred_only`, pick a cert mode
+   (Self-signed is simplest) and Generate → Provision. **Keep the screen awake**
+   — a lock suspends BLE and stalls the final step.
+4. The device card shows `encrypted (saead)` vs `plaintext session`; on success
+   the device console reports `Session authorized` then `cloud device
+   certificate stored`. The same board is provisionable by the CLI and the iOS
+   app, demonstrating cross-client interchangeability.
+
+`app/src/androidTest/.../HardwareProvisioningTest.kt` is an instrumented test of
+this flow against a connected board.
 
 ## Status
 

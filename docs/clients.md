@@ -112,6 +112,12 @@ Because all clients pin to the same fixtures, a message that encodes correctly i
 one client encodes identically in the others and interoperates with the Zephyr
 device codec generated from `cddl/prov.cddl`.
 
+For the **live BLE round-trip**, [`docs/hardware-testing.md`](hardware-testing.md)
+builds, flashes, and monitors a provisioning device; each client's README has
+its own on-device walkthrough. All three have been validated end-to-end against
+the nRF52840 DK running `samples/cred_only` (encrypted saead + credential
+bootstrap).
+
 ## Encryption
 
 All three clients speak both pouch framings and **autodetect** which one the
