@@ -43,6 +43,16 @@ $ ./gradlew :app:installDebug                      # install the reference app o
 verifies every request encoder / pouch frame byte-for-byte, plus SAR loopback and
 full mock-transport Wi-Fi and cred-only flows.
 
+### Prebuilt APKs
+
+No toolchain needed to just run the app: every CI run uploads a
+`pouchprov-app-debug` artifact, and tagged releases attach a
+`pouchprov-app-<tag>.apk` to the [GitHub Release](../../../releases). Install
+with `adb install -r <apk>` or from the phone's file manager. All APKs (local,
+CI, release) are signed with the committed shared debug keystore
+(`app/shared-debug.keystore` — debug-grade, intentionally public credentials),
+so any build installs over any other without uninstalling.
+
 ## Using the SDK
 
 ```kotlin
